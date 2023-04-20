@@ -1,13 +1,7 @@
-[![twitter spresense handle][]][twitter spresense badge]
-[![twitter devworld handle][]][twitter devworld badge]
+# Welcome to HASS Cansat team 2023 project
 
-# Welcome to SPRESENSE project
-
-Clone this repository and update submodules.
-
-```
-$ git clone --recursive https://github.com/sonydevworld/spresense.git
-```
+This project is made by ITIS Enrico Fermi students. Commits are released to prepare the final result for the Cansat Europe Competition 2023 edition.
+The sony spresense overcomes every difficulty that stands in the way of it. Powered ARM® Cortex®-M4F x 6 cores (yes, thats a lot for IoT). That's why we chose Nuttx to support that deployment.
 
 # Submodules
 
