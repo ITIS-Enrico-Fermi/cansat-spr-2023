@@ -1,0 +1,25 @@
+
+config CANSAT_APPS_LORA_TEST
+	tristate "Test RFM95 character driver"
+	default y
+	---help---
+		Enable the lora_test app
+
+if CANSAT_APPS_LORA_TEST
+
+config CANSAT_APPS_LORA_TEST_PROGNAME
+	string "Program name"
+	default "lora_test"
+	---help---
+		This is the name of the program that will be use when the NSH ELF
+		program is installed.
+
+config CANSAT_APPS_LORA_TEST_PRIORITY
+	int "lora_test task priority"
+	default 100
+
+config CANSAT_APPS_LORA_TEST_STACKSIZE
+	int "lora_test stack size"
+	default 2048
+
+endif
