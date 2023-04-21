@@ -1,0 +1,25 @@
+
+config CANSAT_APPS_RFM95_USERSPACE
+	tristate "Userspace library for LoRa transmission via RFM95"
+	default y
+	---help---
+		Enable the rfm95_userspace app
+
+if CANSAT_APPS_RFM95_USERSPACE
+
+config CANSAT_APPS_RFM95_USERSPACE_PROGNAME
+	string "Program name"
+	default "rfm95_userspace"
+	---help---
+		This is the name of the program that will be use when the NSH ELF
+		program is installed.
+
+config CANSAT_APPS_RFM95_USERSPACE_PRIORITY
+	int "rfm95_userspace task priority"
+	default 100
+
+config CANSAT_APPS_RFM95_USERSPACE_STACKSIZE
+	int "rfm95_userspace stack size"
+	default 2048
+
+endif

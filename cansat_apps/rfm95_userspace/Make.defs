@@ -1,0 +1,4 @@
+
+ifneq ($(CONFIG_CANSAT_APPS_RFM95_USERSPACE),)
+CONFIGURED_APPS += rfm95_userspace
+endif
