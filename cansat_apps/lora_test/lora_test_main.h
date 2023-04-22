@@ -15,7 +15,7 @@ void rfm95_set_preamble_length(long length);
 void rfm95_set_sync_word(int sw);
 void rfm95_enable_crc(void);
 void rfm95_disable_crc(void);
-int rfm95_init(const char *dev_path;
+int rfm95_init(const char *dev_path);
 void rfm95_send_packet(const uint8_t *buf, int size);
 int rfm95_receive_packet(uint8_t *buf, int size);
 int rfm95_received(void);
