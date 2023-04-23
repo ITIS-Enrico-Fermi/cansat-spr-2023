@@ -30,9 +30,37 @@
 #include <string.h>
 #include "nuttx/rf/rfm95.h"
 
+#define DEV_NAME "/dev/radio0"
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+#if 0
+void rfm95_reset(void);
+void rfm95_explicit_header_mode(void);
+void rfm95_implicit_header_mode(int size);
+void rfm95_idle(void);
+void rfm95_sleep(void); 
+void rfm95_receive(void);
+void rfm95_set_tx_power(int level);
+void rfm95_set_frequency(long frequency);
+void rfm95_set_spreading_factor(int sf);
+void rfm95_set_bandwidth(long sbw);
+void rfm95_set_coding_rate(int denominator);
+void rfm95_set_preamble_length(long length);
+void rfm95_set_sync_word(int sw);
+void rfm95_enable_crc(void);
+void rfm95_disable_crc(void);
+int rfm95_init(const char *dev_path);
+void rfm95_send_packet(const uint8_t *buf, int size);
+int rfm95_receive_packet(uint8_t *buf, int size);
+int rfm95_received(void);
+int rfm95_packet_rssi(void);
+float rfm95_packet_snr(void);
+void rfm95_close(void);
+int rfm95_initialized(void);
+void rfm95_dump_registers(void);
 
 static int __implicit;
 static long __frequency;
@@ -355,7 +383,7 @@ void rfm95_close(void) {
    rfm95_sleep();
    close(radio_fd);
 }
-
+#endif
 
 /****************************************************************************
  * main
@@ -367,16 +395,33 @@ void rfm95_close(void) {
  */
 int main(int argc, FAR char *argv[])
 {
+  int ret;
   printf("RFM95 driver test app\n");
 
-  /* Open SPI Test Driver */
-  rfm95_init("/dev/radio0");
+  int fd = open(DEV_NAME, O_RDWR);
+  if (fd < 0)
+    {
+      int errcode = errno;
+      printf("ERROR: Failed to open device %s: %d\n", DEV_NAME, errcode);
+    }
 
-  uint8_t msg = 1;
-  uint8_t * ptr_msg = &msg;
-  rfm95_send_packet(ptr_msg, sizeof(msg));
-  up_mdelay(1000);
+  ret = ioctl(fd, RFM95_IOCTL_INIT, 0);
+  if (ret < 0)
+    {
+      printf("failed to change init: %d!\n", ret);
+    }
 
-  close(radio_fd);
+  printf("Init done!\n");
+
+  char msg[5] = {"Ciao!"};
+  ret = write(fd, msg, sizeof(msg));
+  if (ret < 0)
+    {
+      printf("failed to send message: %d!\n", ret);
+    }
+
+  printf("Message sent!\n");
+
+  close(fd);
   return 0;
 }
