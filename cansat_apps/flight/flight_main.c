@@ -9,7 +9,7 @@
 #include <debug.h>
 
 
-int uv_fd, gyro_fd; // < file descriptors of sensors
+int uv_fd, gyro_fd, press_fd; // < file descriptors of sensors
 bool stop = false;  // < stop condition
 
 
@@ -48,6 +48,7 @@ typedef struct gyro_accel_data gyro_t;
 struct __attribute__((__packed__)) lora_packet {
   gyro_t position;
   uint16_t light;
+  uint32_t pressure;
   uint32_t counter; // < monotonic packet counter
 };
 
@@ -56,11 +57,13 @@ struct __attribute__((__packed__)) lora_packet {
 void open_sensors() {
   uv_fd = open("/dev/sensor/uv0", O_RDONLY);
   gyro_fd = open("/dev/sensor/gyro0", O_RDONLY);
+  press_fd = open("/dev/press0", O_RDONLY);
 }
 
 void close_sensors() {
   close(uv_fd);
   close(gyro_fd);
+  close(press_fd);
 }
 
 
@@ -68,6 +71,7 @@ void close_sensors() {
 int main(int argc, FAR char *argv[]) {
   uint16_t light = 0;
   gyro_t position;
+  uint32_t pressure;
   struct lora_packet pkt = {.counter = 0};
 
   open_sensors();
@@ -80,17 +84,21 @@ int main(int argc, FAR char *argv[]) {
 
 
   while(!stop) {
-    read(uv_fd, &light, sizeof(light));
-    read(gyro_fd, &position, sizeof(position));
+    // We assume each read is successful each time, but the return code should be checked
+    read(uv_fd, &light, sizeof(uint16_t));
+    read(gyro_fd, &position, sizeof(gyro_t));
+    read(press_fd, &pressure, sizeof(uint32_t));
 
     /* Log the gathered data */
     printf("UV light: %d\n", light);
     printf("Accel position x %d, y %d, z %d\n", position.accel.x, position.accel.y, position.accel.z);
     printf("Gyro rotation x %d, y %d, z %d\n", position.roto.x, position.roto.y, position.roto.z);
     printf("Temperature %d\n", position.temp);
+    printf("Pressure: %d\n", pressure);
 
     pkt.light = light;
     pkt.position = position;
+    pkt.pressure = pressure;
     write(lora_fd, (void *)&pkt, sizeof(pkt));
 
     pkt.counter++;

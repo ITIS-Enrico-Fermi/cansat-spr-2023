@@ -14,15 +14,9 @@ These sensors are curretly implemented:
 |----------|-------------------|------------------------------------------------|
 | VEML6070 | /dev/sensor/uv0   | UV light measurement                           |
 | MPU6050  | /dev/sensor/gyro0 | Acceleration, rotational momentum, temperature |
+| BMP280   | /dev/press0       | Pressure                                       |
 
-
-## To be implemented
-
-| Name   | Device path      | Provides                                    |
-|--------|------------------|---------------------------------------------|
-| BMP280 | /dev/sensor/env0 | Pressure (barometric altitude), temperature |
-
-*BMP280 must be implemented in kernel space too.
+*BMP280 kernel space code must be checked, and its device path changed to `/dev/sensor/press0`.
 
 
 ## Involved code
