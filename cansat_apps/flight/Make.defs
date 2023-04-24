@@ -1,0 +1,4 @@
+
+ifneq ($(CONFIG_CANSAT_APPS_FLIGHT),)
+CONFIGURED_APPS += flight
+endif
