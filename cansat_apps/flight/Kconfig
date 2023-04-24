@@ -1,0 +1,25 @@
+
+config CANSAT_APPS_FLIGHT
+	tristate "Flight manager for sensors and LoRa transmission"
+	default y
+	---help---
+		Enable the flight app
+
+if CANSAT_APPS_FLIGHT
+
+config CANSAT_APPS_FLIGHT_PROGNAME
+	string "Program name"
+	default "flight"
+	---help---
+		This is the name of the program that will be use when the NSH ELF
+		program is installed.
+
+config CANSAT_APPS_FLIGHT_PRIORITY
+	int "flight task priority"
+	default 100
+
+config CANSAT_APPS_FLIGHT_STACKSIZE
+	int "flight stack size"
+	default 2048
+
+endif
