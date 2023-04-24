@@ -30,6 +30,14 @@
 #include <string.h>
 #include "nuttx/rf/rfm95.h"
 
+#include <nuttx/kmalloc.h>
+#include <nuttx/fs/fs.h>
+#include <nuttx/spi/spi.h>
+#include <nuttx/rf/ioctl.h>
+#include <nuttx/rf/attenuator.h>
+#include <nuttx/rf/rfm95.h>
+#include <arch/board/board.h>
+
 #define DEV_NAME "/dev/radio0"
 
 /****************************************************************************
@@ -414,13 +422,16 @@ int main(int argc, FAR char *argv[])
   printf("Init done!\n");
 
   char msg[5] = {"Ciao!"};
-  ret = write(fd, msg, sizeof(msg));
-  if (ret < 0)
-    {
-      printf("failed to send message: %d!\n", ret);
-    }
-
-  printf("Message sent!\n");
+  for(int i=0;i<5;i++)
+  {
+   ret = write(fd, msg, sizeof(msg));
+   if (ret < 0)
+      {
+         printf("failed to send message: %d!\n", ret);
+      }
+   else printf("Message sent!\n");
+   up_mdelay(1000);
+  }
 
   close(fd);
   return 0;
