@@ -50,7 +50,7 @@
 #define STILL_BUFNUM       (1)
 
 #define MAX_CAPTURE_NUM     (100)
-#define DEFAULT_CAPTURE_NUM (10)
+#define DEFAULT_CAPTURE_NUM (1)
 
 #define START_CAPTURE_TIME  (5)   /* seconds */
 #define KEEP_VIDEO_TIME     (10)  /* seconds */
@@ -81,15 +81,16 @@ int camera_prepare(int fd, enum v4l2_buf_type type,
                           struct v_buffer **vbuf,
                           uint8_t buffernum, int buffersize);
 void free_buffer(struct v_buffer  *buffers, uint8_t bufnum);
-int parse_arguments(int argc, char *argv[],
-                           int *capture_num, enum v4l2_buf_type *type);
-int get_camimage(int fd, struct v4l2_buffer *v4l2_buf,
-    enum v4l2_buf_type buf_type);
-int release_camimage(int fd, struct v4l2_buffer *v4l2_buf);
-int start_stillcapture(int v_fd, enum v4l2_buf_type capture_type);
-int stop_stillcapture(int v_fd, enum v4l2_buf_type capture_type);
+int get_image(int fd);
+int release_image(int fd);
+int start_capture(int v_fd);
+int stop_capture(int v_fd);
 
 const char *get_imgsensor_name(int fd);
+int prepare_stream(int v_fd);
+
+int camlib_init(int cam_fd);
+void camlib_clear(void);
 
 /****************************************************************************
  * Public Function Prototypes
@@ -101,7 +102,7 @@ const char *cutil_setpath(void);
 
 /* Write an image file */
 
-int cutil_writeimage(uint8_t *data, size_t len, const char *fsuffix);
+int write_image(void);
 
 #endif  /* __APPS_EXAMPLES_CAMERA_CAMERA_FILEUTIL_H */
 

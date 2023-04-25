@@ -27,6 +27,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <debug.h>
 
 #include <camera_utils.h>
 
@@ -41,6 +42,14 @@
  ****************************************************************************/
 
 static const char *save_dir;
+static bool is_initialized = false;
+static const char *sensor;
+enum v4l2_buf_type capture_type = V4L2_BUF_TYPE_STILL_CAPTURE;
+struct v4l2_buffer v4l2_buf;
+static uint16_t w, h;
+struct v_buffer *buffers_video = NULL;
+struct v_buffer *buffers_still = NULL;
+
 
 /****************************************************************************
  * Public Functions
@@ -82,8 +91,11 @@ const char *cutil_setpath(void)
  *   Write a image file to selected storage.
  ****************************************************************************/
 
-int cutil_writeimage(uint8_t *data, size_t len, const char *fsuffix)
+int write_image()
 {
+  uint8_t *data = (uint8_t *)v4l2_buf.m.userptr;
+  size_t len = (size_t)v4l2_buf.bytesused;
+  const char *fsuffix = (capture_type == V4L2_BUF_TYPE_VIDEO_CAPTURE) ? "RGB" : "JPG";
   static char s_fname[IMAGE_FILENAME_LEN];
   static int s_framecount = 0;
 
@@ -279,24 +291,24 @@ void free_buffer(struct v_buffer  *buffers, uint8_t bufnum)
 }
 
 /****************************************************************************
- * Name: get_camimage()
+ * Name: get_image()
  *
  * Description:
  *   DQBUF camera frame buffer from video driver with taken picture data.
  ****************************************************************************/
 
-int get_camimage(int fd, struct v4l2_buffer *v4l2_buf,
-    enum v4l2_buf_type buf_type)
+int get_image(int fd)
 {
   int ret;
+  struct v4l2_buffer *v4l2_buf_ptr = &v4l2_buf;
 
   /* VIDIOC_DQBUF acquires captured data. */
 
-  memset(v4l2_buf, 0, sizeof(v4l2_buffer_t));
-  v4l2_buf->type = buf_type;
-  v4l2_buf->memory = V4L2_MEMORY_USERPTR;
+  memset(v4l2_buf_ptr, 0, sizeof(v4l2_buffer_t));
+  v4l2_buf_ptr->type = capture_type;
+  v4l2_buf_ptr->memory = V4L2_MEMORY_USERPTR;
 
-  ret = ioctl(fd, VIDIOC_DQBUF, (unsigned long)v4l2_buf);
+  ret = ioctl(fd, VIDIOC_DQBUF, (unsigned long)v4l2_buf_ptr);
   if (ret)
     {
       printf("Fail DQBUF %d\n", errno);
@@ -307,19 +319,20 @@ int get_camimage(int fd, struct v4l2_buffer *v4l2_buf,
 }
 
 /****************************************************************************
- * Name: release_camimage()
+ * Name: release_image()
  *
  * Description:
  *   Re-QBUF to set used frame buffer into video driver.
  ****************************************************************************/
 
-int release_camimage(int fd, struct v4l2_buffer *v4l2_buf)
+int release_image(int fd)
 {
   int ret;
+  struct v4l2_buffer *v4l2_buf_ptr = &v4l2_buf;
 
   /* VIDIOC_QBUF sets buffer pointer into video driver again. */
 
-  ret = ioctl(fd, VIDIOC_QBUF, (unsigned long)v4l2_buf);
+  ret = ioctl(fd, VIDIOC_QBUF, (unsigned long)v4l2_buf_ptr);
   if (ret)
     {
       printf("Fail QBUF %d\n", errno);
@@ -337,13 +350,13 @@ int release_camimage(int fd, struct v4l2_buffer *v4l2_buf)
  *   STILL_CAPTURE.
  ****************************************************************************/
 
-int start_stillcapture(int v_fd, enum v4l2_buf_type capture_type)
+int start_capture(int cam_fd)
 {
   int ret;
 
   if (capture_type == V4L2_BUF_TYPE_STILL_CAPTURE)
     {
-      ret = ioctl(v_fd, VIDIOC_TAKEPICT_START, 0);
+      ret = ioctl(cam_fd, VIDIOC_TAKEPICT_START, 0);
       if (ret < 0)
         {
           printf("Failed to start taking picture\n");
@@ -355,19 +368,19 @@ int start_stillcapture(int v_fd, enum v4l2_buf_type capture_type)
 }
 
 /****************************************************************************
- * Name: stop_stillcapture()
+ * Name: stop_capture()
  *
  * Description:
  *   Stop STILL capture stream by TAKEPICT_STOP if buf_type is STILL_CAPTURE.
  ****************************************************************************/
 
-int stop_stillcapture(int v_fd, enum v4l2_buf_type capture_type)
+int stop_capture(int cam_fd)
 {
   int ret;
 
   if (capture_type == V4L2_BUF_TYPE_STILL_CAPTURE)
     {
-      ret = ioctl(v_fd, VIDIOC_TAKEPICT_STOP, false);
+      ret = ioctl(cam_fd, VIDIOC_TAKEPICT_STOP, false);
       if (ret < 0)
         {
           printf("Failed to stop taking picture\n");
@@ -392,4 +405,106 @@ const char *get_imgsensor_name(int fd)
   ioctl(fd, VIDIOC_QUERYCAP, (unsigned long)&cap);
 
   return (const char *)cap.driver;
+}
+
+int prepare_stream(int v_fd)
+{
+  int ret;
+  /* Prepare for STILL_CAPTURE stream.
+   *
+   * The video buffer mode is V4L2_BUF_MODE_FIFO mode.
+   * In this FIFO mode, if all VIDIOC_QBUFed frame buffers are captured image
+   * and no additional frame buffers are VIDIOC_QBUFed, the capture stops and
+   * waits for new VIDIOC_QBUFed frame buffer.
+   * And when new VIDIOC_QBUF is executed, the capturing is resumed.
+   *
+   * Allocate frame buffers for JPEG size (512KB).
+   * Set FULLHD size in ISX012 case, QUADVGA size in ISX019 case or other
+   * image sensors,
+   * Number of frame buffers is defined as STILL_BUFNUM(1).
+   * And all allocated memorys are VIDIOC_QBUFed.
+   */
+
+  if (DEFAULT_CAPTURE_NUM != 0)
+  {
+    /* Determine image size from connected image sensor name,
+     * because video driver does not support VIDIOC_ENUM_FRAMESIZES
+     * for now.
+     */
+
+    sensor = get_imgsensor_name(v_fd);
+    if (strncmp(sensor, "ISX012", strlen("ISX012")) == 0)
+    {
+      w = VIDEO_HSIZE_FULLHD;
+      h = VIDEO_VSIZE_FULLHD;
+    }
+    else if (strncmp(sensor, "ISX019", strlen("ISX019")) == 0)
+    {
+      w = VIDEO_HSIZE_QUADVGA;
+      h = VIDEO_VSIZE_QUADVGA;
+    }
+    else
+    {
+      w = VIDEO_HSIZE_QUADVGA;
+      h = VIDEO_VSIZE_QUADVGA;
+    }
+
+    ret = camera_prepare(v_fd, V4L2_BUF_TYPE_STILL_CAPTURE,
+                         V4L2_BUF_MODE_FIFO, V4L2_PIX_FMT_JPEG,
+                         w, h,
+                         &buffers_still, STILL_BUFNUM, IMAGE_JPG_SIZE);
+    if (ret != OK)
+    {
+      return ret;
+    }
+  }
+
+  /* Prepare for VIDEO_CAPTURE stream.
+   *
+   * The video buffer mode is V4L2_BUF_MODE_RING mode.
+   * In this RING mode, if all VIDIOC_QBUFed frame buffers are captured image
+   * and no additional frame buffers are VIDIOC_QBUFed, the capture continues
+   * as the oldest image in the V4L2_BUF_QBUFed frame buffer is reused in
+   * order from the captured frame buffer and a new camera image is
+   * recaptured.
+   *
+   * Allocate freame buffers for QVGA RGB565 size (320x240x2=150KB).
+   * Number of frame buffers is defined as VIDEO_BUFNUM(3).
+   * And all allocated memorys are VIDIOC_QBUFed.
+   */
+
+  ret = camera_prepare(v_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE,
+                       V4L2_BUF_MODE_RING, V4L2_PIX_FMT_RGB565,
+                       VIDEO_HSIZE_QVGA, VIDEO_VSIZE_QVGA,
+                       &buffers_video, VIDEO_BUFNUM, IMAGE_RGB_SIZE);
+  if (ret != OK)
+  {
+    return ret;
+  }
+  return ret;
+}
+
+int camlib_init(int cam_fd){
+  int ret;
+
+  save_dir = cutil_setpath();
+  if(save_dir != "/dev/sd0"){
+    snwarn("WARNING: can't get sd0 as write image path\n");
+  }
+
+  ret = prepare_stream(cam_fd);
+  if (ret != 0)
+  {
+    snerr("ERROR: Failed to prepare stream!\n");
+    return ERROR;
+  }
+
+  is_initialized = true;
+  return OK;
+}
+
+void camlib_clear(void)
+{
+  free_buffer(buffers_video, VIDEO_BUFNUM);
+  free_buffer(buffers_still, STILL_BUFNUM);
 }
