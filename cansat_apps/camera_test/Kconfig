@@ -1,0 +1,25 @@
+
+config CANSAT_APPS_CAMERA_TEST
+	tristate "Camera board test for future implementation"
+	default y
+	---help---
+		Enable the camera_test app
+
+if CANSAT_APPS_CAMERA_TEST
+
+config CANSAT_APPS_CAMERA_TEST_PROGNAME
+	string "Program name"
+	default "camera_test"
+	---help---
+		This is the name of the program that will be use when the NSH ELF
+		program is installed.
+
+config CANSAT_APPS_CAMERA_TEST_PRIORITY
+	int "camera_test task priority"
+	default 100
+
+config CANSAT_APPS_CAMERA_TEST_STACKSIZE
+	int "camera_test stack size"
+	default 2048
+
+endif

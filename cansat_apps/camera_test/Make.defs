@@ -1,0 +1,4 @@
+
+ifneq ($(CONFIG_CANSAT_APPS_CAMERA_TEST),)
+CONFIGURED_APPS += camera_test
+endif
