@@ -138,7 +138,7 @@ static int gnss_setparams(int fd) {
   }
 
   /* Set the type of satellite system used by GNSS. */
-  set_satellite = CXD56_GNSS_SAT_GPS | CXD56_GNSS_SAT_GLONASS | CXD56_GNSS_SAT_GALILEO;
+  set_satellite = CXD56_GNSS_SAT_GPS | CXD56_GNSS_SAT_GLONASS;
 
   ret = ioctl(fd, CXD56_GNSS_IOCTL_SELECT_SATELLITE_SYSTEM, set_satellite);
   if (ret < 0) {
