@@ -50,7 +50,6 @@ static uint16_t w, h;
 struct v_buffer *buffers_video = NULL;
 struct v_buffer *buffers_still = NULL;
 
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -73,13 +72,13 @@ const char *cutil_setpath(void)
 
   ret = stat("/mnt/sd0", &stat_buf);
   if (ret < 0)
-    {
-      save_dir = "/mnt/spif";
-    }
+  {
+    save_dir = "/mnt/spif";
+  }
   else
-    {
-      save_dir = "/mnt/sd0";
-    }
+  {
+    save_dir = "/mnt/sd0";
+  }
 
   return save_dir;
 }
@@ -103,9 +102,9 @@ int write_image()
 
   s_framecount++;
   if (s_framecount >= 1000)
-    {
-      s_framecount = 1;
-    }
+  {
+    s_framecount = 1;
+  }
 
   memset(s_fname, 0, sizeof(s_fname));
 
@@ -114,19 +113,19 @@ int write_image()
            "%s/VIDEO%03d.%s",
            save_dir, s_framecount, fsuffix);
 
-  printf("FILENAME:%s\n", s_fname);
+  verr("FILENAME:%s\n", s_fname);
 
   fp = fopen(s_fname, "wb");
   if (NULL == fp)
-    {
-      printf("fopen error : %d\n", errno);
-      return -1;
-    }
+  {
+    verr("fopen error : %d\n", errno);
+    return -1;
+  }
 
   if (len != fwrite(data, 1, len, fp))
-    {
-      printf("fwrite error : %d\n", errno);
-    }
+  {
+    verr("fwrite error : %d\n", errno);
+  }
 
   fclose(fp);
   return 0;
@@ -141,127 +140,124 @@ int write_image()
  ****************************************************************************/
 
 int camera_prepare(int fd, enum v4l2_buf_type type,
-                          uint32_t buf_mode, uint32_t pixformat,
-                          uint16_t hsize, uint16_t vsize,
-                          struct v_buffer **vbuf,
-                          uint8_t buffernum, int buffersize)
+                   uint32_t buf_mode, uint32_t pixformat,
+                   uint16_t hsize, uint16_t vsize,
+                   struct v_buffer **vbuf,
+                   uint8_t buffernum, int buffersize)
 {
   int ret;
   int cnt;
   struct v4l2_format fmt =
-  {
-    0
-  };
+      {
+          0};
 
   struct v4l2_requestbuffers req =
-  {
-    0
-  };
+      {
+          0};
 
   struct v4l2_buffer buf =
-  {
-    0
-  };
+      {
+          0};
 
   /* VIDIOC_REQBUFS initiate user pointer I/O */
 
-  req.type   = type;
+  req.type = type;
   req.memory = V4L2_MEMORY_USERPTR;
-  req.count  = buffernum;
-  req.mode   = buf_mode;
+  req.count = buffernum;
+  req.mode = buf_mode;
 
   ret = ioctl(fd, VIDIOC_REQBUFS, (unsigned long)&req);
   if (ret < 0)
-    {
-      printf("Failed to VIDIOC_REQBUFS: errno = %d\n", errno);
-      return ret;
-    }
+  {
+    verr("Failed to VIDIOC_REQBUFS: errno = %d\n", errno);
+    return ret;
+  }
 
   /* VIDIOC_S_FMT set format */
 
-  fmt.type                = type;
-  fmt.fmt.pix.width       = hsize;
-  fmt.fmt.pix.height      = vsize;
-  fmt.fmt.pix.field       = V4L2_FIELD_ANY;
+  fmt.type = type;
+  fmt.fmt.pix.width = hsize;
+  fmt.fmt.pix.height = vsize;
+  fmt.fmt.pix.field = V4L2_FIELD_ANY;
   fmt.fmt.pix.pixelformat = pixformat;
 
   ret = ioctl(fd, VIDIOC_S_FMT, (unsigned long)&fmt);
   if (ret < 0)
-    {
-      printf("Failed to VIDIOC_S_FMT: errno = %d\n", errno);
-      return ret;
-    }
+  {
+    verr("Failed to VIDIOC_S_FMT: errno = %d\n", errno);
+    return ret;
+  }
 
   /* Prepare video memory to store images */
 
   *vbuf = malloc(sizeof(v_buffer_t) * buffernum);
 
   if (!(*vbuf))
-    {
-      printf("Out of memory for array of v_buffer_t[%d]\n", buffernum);
-      return ERROR;
-    }
+  {
+    verr("Out of memory for array of v_buffer_t[%d]\n", buffernum);
+    return ERROR;
+  }
 
   for (cnt = 0; cnt < buffernum; cnt++)
+  {
+    (*vbuf)[cnt].length = buffersize;
+
+    /* Note:
+     * VIDIOC_QBUF set buffer pointer.
+     * Buffer pointer must be 32bytes aligned.
+     */
+
+    (*vbuf)[cnt].start = memalign(32, buffersize);
+    if (!(*vbuf)[cnt].start)
     {
-      (*vbuf)[cnt].length = buffersize;
+      verr("Out of memory for image buffer of %d/%d\n",
+             cnt, buffernum);
 
-      /* Note:
-       * VIDIOC_QBUF set buffer pointer.
-       * Buffer pointer must be 32bytes aligned.
-       */
+      /* Release allocated memory. */
 
-      (*vbuf)[cnt].start  = memalign(32, buffersize);
-      if (!(*vbuf)[cnt].start)
-        {
-          printf("Out of memory for image buffer of %d/%d\n",
-                 cnt, buffernum);
+      while (cnt)
+      {
+        cnt--;
+        free((*vbuf)[cnt].start);
+      }
 
-          /* Release allocated memory. */
-
-          while (cnt)
-            {
-              cnt--;
-              free((*vbuf)[cnt].start);
-            }
-
-          free(*vbuf);
-          *vbuf = NULL;
-          return ERROR;
-        }
+      free(*vbuf);
+      *vbuf = NULL;
+      return ERROR;
     }
+  }
 
   /* VIDIOC_QBUF enqueue buffer */
 
   for (cnt = 0; cnt < buffernum; cnt++)
-    {
-      memset(&buf, 0, sizeof(v4l2_buffer_t));
-      buf.type = type;
-      buf.memory = V4L2_MEMORY_USERPTR;
-      buf.index = cnt;
-      buf.m.userptr = (unsigned long)(*vbuf)[cnt].start;
-      buf.length = (*vbuf)[cnt].length;
+  {
+    memset(&buf, 0, sizeof(v4l2_buffer_t));
+    buf.type = type;
+    buf.memory = V4L2_MEMORY_USERPTR;
+    buf.index = cnt;
+    buf.m.userptr = (unsigned long)(*vbuf)[cnt].start;
+    buf.length = (*vbuf)[cnt].length;
 
-      ret = ioctl(fd, VIDIOC_QBUF, (unsigned long)&buf);
-      if (ret)
-        {
-          printf("Fail QBUF %d\n", errno);
-          free_buffer(*vbuf, buffernum);
-          *vbuf = NULL;
-          return ERROR;
-        }
+    ret = ioctl(fd, VIDIOC_QBUF, (unsigned long)&buf);
+    if (ret)
+    {
+      verr("Fail QBUF %d\n", errno);
+      free_buffer(*vbuf, buffernum);
+      *vbuf = NULL;
+      return ERROR;
     }
+  }
 
   /* VIDIOC_STREAMON start stream */
 
   ret = ioctl(fd, VIDIOC_STREAMON, (unsigned long)&type);
   if (ret < 0)
-    {
-      printf("Failed to VIDIOC_STREAMON: errno = %d\n", errno);
-      free_buffer(*vbuf, buffernum);
-      *vbuf = NULL;
-      return ret;
-    }
+  {
+    verr("Failed to VIDIOC_STREAMON: errno = %d\n", errno);
+    free_buffer(*vbuf, buffernum);
+    *vbuf = NULL;
+    return ret;
+  }
 
   return OK;
 }
@@ -273,21 +269,21 @@ int camera_prepare(int fd, enum v4l2_buf_type type,
  *   All free allocated memory of v_buffer.
  ****************************************************************************/
 
-void free_buffer(struct v_buffer  *buffers, uint8_t bufnum)
+void free_buffer(struct v_buffer *buffers, uint8_t bufnum)
 {
   uint8_t cnt;
   if (buffers)
+  {
+    for (cnt = 0; cnt < bufnum; cnt++)
     {
-      for (cnt = 0; cnt < bufnum; cnt++)
-        {
-          if (buffers[cnt].start)
-            {
-              free(buffers[cnt].start);
-            }
-        }
-
-      free(buffers);
+      if (buffers[cnt].start)
+      {
+        free(buffers[cnt].start);
+      }
     }
+
+    free(buffers);
+  }
 }
 
 /****************************************************************************
@@ -310,10 +306,10 @@ int get_image(int fd)
 
   ret = ioctl(fd, VIDIOC_DQBUF, (unsigned long)v4l2_buf_ptr);
   if (ret)
-    {
-      printf("Fail DQBUF %d\n", errno);
-      return ERROR;
-    }
+  {
+    verr("Fail DQBUF %d\n", errno);
+    return ERROR;
+  }
 
   return OK;
 }
@@ -334,10 +330,10 @@ int release_image(int fd)
 
   ret = ioctl(fd, VIDIOC_QBUF, (unsigned long)v4l2_buf_ptr);
   if (ret)
-    {
-      printf("Fail QBUF %d\n", errno);
-      return ERROR;
-    }
+  {
+    verr("Fail QBUF %d\n", errno);
+    return ERROR;
+  }
 
   return OK;
 }
@@ -355,14 +351,14 @@ int start_capture(int cam_fd)
   int ret;
 
   if (capture_type == V4L2_BUF_TYPE_STILL_CAPTURE)
+  {
+    ret = ioctl(cam_fd, VIDIOC_TAKEPICT_START, 0);
+    if (ret < 0)
     {
-      ret = ioctl(cam_fd, VIDIOC_TAKEPICT_START, 0);
-      if (ret < 0)
-        {
-          printf("Failed to start taking picture\n");
-          return ERROR;
-        }
+      verr("Failed to start taking picture\n");
+      return ERROR;
     }
+  }
 
   return OK;
 }
@@ -379,14 +375,14 @@ int stop_capture(int cam_fd)
   int ret;
 
   if (capture_type == V4L2_BUF_TYPE_STILL_CAPTURE)
+  {
+    ret = ioctl(cam_fd, VIDIOC_TAKEPICT_STOP, false);
+    if (ret < 0)
     {
-      ret = ioctl(cam_fd, VIDIOC_TAKEPICT_STOP, false);
-      if (ret < 0)
-        {
-          printf("Failed to stop taking picture\n");
-          return ERROR;
-        }
+      verr("Failed to stop taking picture\n");
+      return ERROR;
     }
+  }
 
   return OK;
 }
@@ -484,11 +480,13 @@ int prepare_stream(int v_fd)
   return ret;
 }
 
-int camlib_init(int cam_fd){
+int camlib_init(int cam_fd)
+{
   int ret;
 
   save_dir = cutil_setpath();
-  if(save_dir != "/dev/sd0"){
+  if (save_dir != "/dev/sd0")
+  {
     snwarn("WARNING: can't get sd0 as write image path\n");
   }
 
@@ -507,4 +505,25 @@ void camlib_clear(void)
 {
   free_buffer(buffers_video, VIDEO_BUFNUM);
   free_buffer(buffers_still, STILL_BUFNUM);
+}
+
+int shoot_photo(int cam_fd)
+{
+  int ret;
+  ret = get_image(cam_fd);
+  if (ret != OK)
+  {
+    verr("Can't get image...\n");
+    return ERROR;
+  }
+  write_image();
+
+  ret = release_image(cam_fd);
+  if (ret != OK)
+  {
+    verr("Can't release image...\n");
+    return ERROR;
+  }
+
+  return OK;
 }

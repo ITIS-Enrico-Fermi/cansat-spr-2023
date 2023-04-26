@@ -89,6 +89,7 @@ int stop_capture(int v_fd);
 const char *get_imgsensor_name(int fd);
 int prepare_stream(int v_fd);
 
+int shoot_photo(int cam_fd);
 int camlib_init(int cam_fd);
 void camlib_clear(void);
 

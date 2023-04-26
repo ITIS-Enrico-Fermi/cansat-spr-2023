@@ -10,17 +10,6 @@ int main(int argc, FAR char *argv[])
   int cam_fd;
   int capture_num = DEFAULT_CAPTURE_NUM;
 
-  /* Initialize video driver to create a device file
-   *  It's like a register but it's required for this kind of driver
-   *  TODO: move this into cxd56_bringup.c
-  ret = video_initialize("/dev/camera0");
-  if (ret != 0)
-  {
-    printf("ERROR: Failed to initialize video: errno = %d\n", errno);
-    return ERROR;
-  }
-  */
-
   /* Open the device file. */
   cam_fd = open("/dev/camera0", 0);
   if (cam_fd < 0)
@@ -33,6 +22,7 @@ int main(int argc, FAR char *argv[])
   ret = camlib_init(cam_fd);
 
   printf("Start capturing...\n");
+  /* Avvio della fase lettura */
   ret = start_capture(cam_fd);
   if (ret != OK)
   {
@@ -40,6 +30,30 @@ int main(int argc, FAR char *argv[])
     return ERROR;
   }
 
+  /************************************
+   * MODALITÀ ACCORCIATA
+   * Questa modalità fa tutto da sola. Scatta la foto, la scrive sul disco
+   * e rilascia la foto. tutto dentro a shoot_photo()
+   * Più semplice di così non si può
+   */
+  while (capture_num)
+  {
+    ret = shoot_photo(cam_fd);
+    if (ret != OK)
+    {
+      printf("Can't shoot photo...\n");
+      return ERROR;
+    }
+
+    capture_num--;
+  }
+
+  /************************************
+   * MODALITÀ STANDARD
+   * Qui sostanzialmente il processo con l'uso della libreria
+   * è solo semplificato, ma le funzioni sono quelle..
+   */
+  /*
   while (capture_num)
   {
     ret = get_image(cam_fd);
@@ -48,7 +62,7 @@ int main(int argc, FAR char *argv[])
       printf("Can't get image...\n");
       return ERROR;
     }
-    /* Write image on persistent memory */
+
     write_image();
 
     ret = release_image(cam_fd);
@@ -60,6 +74,7 @@ int main(int argc, FAR char *argv[])
 
     capture_num--;
   }
+  */
 
   ret = stop_capture(cam_fd);
   if (ret != OK)
