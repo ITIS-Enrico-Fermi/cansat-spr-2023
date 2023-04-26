@@ -2,7 +2,7 @@
 #include <nuttx/config.h>
 #include <stdio.h>
 #include <nuttx/video/video.h>
-#include <camera_utils.h>
+#include <isxcamera.h>
 
 int main(int argc, FAR char *argv[])
 {
