@@ -485,7 +485,7 @@ int camlib_init(int cam_fd)
   int ret;
 
   save_dir = cutil_setpath();
-  if (save_dir != "/dev/sd0")
+  if (strcmp(save_dir, "/dev/sd0"))
   {
     snwarn("WARNING: can't get sd0 as write image path\n");
   }
