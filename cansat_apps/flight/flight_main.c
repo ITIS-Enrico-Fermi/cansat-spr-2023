@@ -6,18 +6,27 @@
 #include <unistd.h>
 
 #include <sys/ioctl.h>
-#include <nuttx/config.h>
-#include <debug.h>
 #include <nuttx/sensors/ioctl.h>
 #include <poll.h>
+#include <nuttx/config.h>
+#include <debug.h>
 
 #define BARO_DEV_NAME "/dev/sensor/sensor_baro0"
 #define UV_DEV_NAME "/dev/sensor/sensor_uv0"
 #define GYRO_DEV_NAME "/dev/sensor/sensor_gyro0"
-#define CAMERA_DEV_NAME "/dev/sensor/sensor_camera0"
+#define CAMERA_DEV_NAME "/dev/sensor/sensor_camera0" // not yet implemented
 #define RADIO_DEV_NAME "/dev/radio0"
 
-int uv_fd, gyro_fd, press_fd; // < file descriptors of sensors
+/*
+TODO
+  1. handle errors returned from the read and write system calls.
+  2. check the return values of the ioctl calls.
+  3. free the memory allocated for the buffer space.
+  4. handle the case when the file descriptors returned by the open calls are less than zero.
+*/
+
+int uv_fd, gyro_fd, baro_fd, radio_fd; // < file descriptors of sensors
+struct pollfd fds;
 bool stop = false;            // < stop condition
 
 /**
@@ -81,57 +90,45 @@ struct sensor_baro /* Type: Barometer */
   float temperature;  /* Temperature in degrees celsius */
 };
 
-void open_sensors()
+int open_sensors(void)
 {
-#ifdef CONFIG_SENSORS_VEML6070
-  printf("Opening %s\n", UV_DEV_NAME);
   uv_fd = open(UV_DEV_NAME, O_RDONLY);
-#endif
-  printf("Opening %s\n", GYRO_DEV_NAME);
+  if (uv_fd < 0)
+  {
+    syslog(LOG_ERR, "Can't open file descriptor for light sensor");
+    return -1;
+  }
   gyro_fd = open(GYRO_DEV_NAME, O_RDONLY);
-  printf("Opening %s\n", BARO_DEV_NAME);
-  press_fd = open(BARO_DEV_NAME, O_RDONLY | O_NONBLOCK);
-}
-
-void close_sensors()
-{
-#ifdef CONFIG_SENSORS_VEML6070
-  close(uv_fd);
-#endif
-  close(gyro_fd);
-  close(press_fd);
-}
-
-int main(int argc, FAR char *argv[])
-{
-  int ret;
-  struct pollfd fds;
-  int len_uv = sizeof(uint8_t) * 2;
-  uint8_t *uv_buf = malloc(len_uv);
-  gyro_t position;
-  struct lora_packet pkt = {.counter = 0};
-  struct sensor_gyro *gyro_val;
-  struct sensor_baro *baro_val;
-  int len_baro = sizeof(struct sensor_baro);
-  char *baro_buf = malloc(len_baro);
-  int len_gyro = sizeof(struct sensor_gyro);
-  uint8_t *gyro_buf = malloc(len_gyro);
-
-  printf("Open sensors..\n");
-  open_sensors();
-
+  if (gyro_fd < 0)
+  {
+    syslog(LOG_ERR, "Can't open file descriptor for gyro sensor");
+    return -1;
+  }
+  baro_fd = open(BARO_DEV_NAME, O_RDONLY | O_NONBLOCK);
+  if (baro_fd < 0)
+  {
+    syslog(LOG_ERR, "Can't open file descriptor for baro sensor");
+    return -1;
+  }
 #ifdef CONFIG_RF_RFM95
-  printf("Opening %s\n", RADIO_DEV_NAME);
   int lora_fd = open(RADIO_DEV_NAME, O_WRONLY);
   if (lora_fd < 0)
   {
-    syslog(LOG_ERR, "Can't open the file descriptor for LoRa radio");
+    syslog(LOG_ERR, "Can't open file descriptor for radio module");
     return -1;
   }
 #endif
+  return 0;
+}
+
+int setup_sensors(void)
+{
+  int ret;
+
+  /* Start setup bmp280 */
   unsigned int interval = 1000000;
   unsigned int latency = 0;
-  ret = ioctl(press_fd, SNIOC_SET_INTERVAL, interval);
+  ret = ioctl(baro_fd, SNIOC_SET_INTERVAL, interval);
   if (ret < 0)
   {
     ret = -errno;
@@ -140,9 +137,10 @@ int main(int argc, FAR char *argv[])
       printf("Failed to set interval for sensor:%s, ret:%s\n",
              "bmp280", strerror(errno));
     }
+    return ERROR;
   }
 
-  ret = ioctl(press_fd, SNIOC_BATCH, latency);
+  ret = ioctl(baro_fd, SNIOC_BATCH, latency);
   if (ret < 0)
   {
     ret = -errno;
@@ -151,62 +149,95 @@ int main(int argc, FAR char *argv[])
       printf("Failed to batch for sensor:%s, ret:%s\n",
              "bmp280", strerror(errno));
     }
+    return ERROR;
   }
 
-  fds.fd = press_fd;
+  fds.fd = baro_fd;
   fds.events = POLLIN;
+
+  /* End setup bmp280 */
+  return 0;
+}
+
+void read_sensors(void)
+{
+
+}
+
+void close_sensors(void)
+{
+  close(uv_fd);
+  close(gyro_fd);
+  close(baro_fd);
+}
+
+int main(int argc, FAR char *argv[])
+{
+  int ret;
+  struct lora_packet pkt = {.counter = 0};
+  struct sensor_gyro *gyro_val;
+  struct sensor_baro *baro_val;
+
+  /* Define structure length */
+  int len_baro = sizeof(struct sensor_baro);
+  int len_gyro = sizeof(struct sensor_gyro);
+  int len_uv = sizeof(uint8_t) * 2;
+  
+  /* Allocate buffer space */
+  uint8_t *baro_buf = malloc(len_baro);
+  uint8_t *gyro_buf = malloc(len_gyro);
+  uint8_t *uv_buf = malloc(len_uv);
+
+  ret = open_sensors();
+  if (ret < 0)
+  {
+    printf("Error while opening sensors.\n");
+    return ERROR;
+  }
+
+  ret = setup_sensors();
+  if (ret < 0)
+  {
+    printf("Error while setting sensors ioctl.\n");
+    return ERROR;
+  }
 
   while (!stop)
   {
     // We assume each read is successful each time, but the return code should be checked
-#ifdef CONFIG_SENSORS_VEML6070
-    printf("Reading uv..\n");
     read(uv_fd, uv_buf, len_uv);
-#endif
-    printf("Reading gyro..\n");
-    // read(gyro_fd, &position, sizeof(gyro_t));
-    read(press_fd, gyro_buf, len_gyro);
-    gyro_val = (struct sensor_gyro *)baro_buf;
 
-    printf("Reading baro..\n");
+    read(gyro_fd, gyro_buf, len_gyro);
+    gyro_val = (struct sensor_gyro *)gyro_buf;
+
     if (poll(&fds, 1, -1) > 0)
     {
-      if (read(press_fd, baro_buf, len_baro) >= len_baro)
+      if (read(baro_fd, baro_buf, len_baro) >= len_baro)
       {
         baro_val = (struct sensor_baro *)baro_buf;
       }
     }
-    // read(press_fd, buffer, len);
-    // struct sensor_baro *event = (struct sensor_baro *)buffer;
 
-    /* Log the gathered data */
-#ifdef CONFIG_SENSORS_VEML6070
-    printf("UV: %d\n", uv_buf[0]);
-#endif
-    //printf("Accel position x %d, y %d, z %d\n", position.accel.x, position.accel.y, position.accel.z);
-    //printf("Gyro rotation x %d, y %d, z %d\n", position.roto.x, position.roto.y, position.roto.z);
-    //printf("Temperature %d\n", position.temp);
-    printf("xaccel %d, yaccel %d, zaccel %d\n", gyro_val->x_accel, gyro_val->y_accel, gyro_val->z_accel);
-    printf("Temperature mpu %d\n", gyro_val->temp);
-    printf("x_gyro %d, y_gyro %d, z_gyro %d\n", gyro_val->x_gyro, gyro_val->y_gyro, gyro_val->z_gyro);
-    printf("%s: timestamp:%" PRIu64 " value1:%.2f value2:%.2f\n",
-           "BMP280", baro_val->timestamp, baro_val->pressure, baro_val->temperature);
-
-    //pkt.light = light;
-    //pkt.position = position;
-    //pkt.pressure = pressure;
+    printf("## veml6070 ##\n");
+    printf("uv: %d\n", uv_buf[0]);
+    printf("## mpu6050 ##\n");
+    printf("x_accel: %d\ny_accel: %d\nz_accel: %d\n", gyro_val->x_accel, gyro_val->y_accel, gyro_val->z_accel);
+    printf("temp: %d\n", gyro_val->temp);
+    printf("x_gyro: %d\ny_gyro: %d\nz_gyro: %d\n", gyro_val->x_gyro, gyro_val->y_gyro, gyro_val->z_gyro);
+    printf("## bmp280 ##\n");
+    printf("timestamp: %llu\npress:%.2f (hPa)\ntemp:%.2f (C)\n",
+           baro_val->timestamp, baro_val->pressure, baro_val->temperature);
 
 #ifdef CONFIG_RF_RFM95
     write(lora_fd, (void *)&pkt, sizeof(pkt));
 #endif
 
-    pkt.counter++;
-
-    sleep(2);
+    sleep(5);
   }
 
   free(gyro_buf);
   free(baro_buf);
+  free(uv_buf);
   close_sensors();
 
 #ifdef CONFIG_RF_RFM95
