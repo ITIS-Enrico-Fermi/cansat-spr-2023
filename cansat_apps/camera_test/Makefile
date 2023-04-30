@@ -8,7 +8,7 @@ STACKSIZE = $(CONFIG_CANSAT_APPS_CAMERA_TEST_STACKSIZE)
 MODULE = $(CONFIG_CANSAT_APPS_CAMERA_TEST)
 
 ASRCS =
-CSRCS = camera_utils.c
+CSRCS =
 MAINSRC = camera_test_main.c
 
 include $(APPDIR)/Application.mk

@@ -11,7 +11,7 @@ int main(int argc, FAR char *argv[])
   int capture_num = DEFAULT_CAPTURE_NUM;
 
   /* Open the device file. */
-  cam_fd = open("/dev/camera0", 0);
+  cam_fd = open("/dev/sensor/sensor_camera0", 0);
   if (cam_fd < 0)
   {
     printf("ERROR: Failed to open video0.errno = %d\n", errno);
@@ -46,6 +46,7 @@ int main(int argc, FAR char *argv[])
     }
 
     capture_num--;
+    printf("%d photo left.\n", capture_num);
   }
 
   /************************************
