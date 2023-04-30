@@ -18,6 +18,19 @@
 #define RADIO_DEV_NAME "/dev/radio0"
 
 /*
+ * You can obtain 
+ */
+#define MPU6050_RANGE_2_G 16384 
+#define MPU6050_RANGE_4_G 8192 
+#define MPU6050_RANGE_8_G 4096 
+#define MPU6050_RANGE_16_G 2048
+
+#define MPU6050_RANGE_250_DEG 131
+#define MPU6050_RANGE_500_DEG 65.5
+#define MPU6050_RANGE_1000_DEG 32.8
+#define MPU6050_RANGE_2000_DEG 16.4
+
+/*
 TODO
   1. handle errors returned from the read and write system calls.
   2. check the return values of the ioctl calls.
@@ -171,6 +184,43 @@ void close_sensors(void)
   close(baro_fd);
 }
 
+void parse_gyro(uint8_t *buffer)
+{
+  int16_t rawAccX, rawAccY, rawAccZ, rawTemp, rawGyroX, rawGyroY, rawGyroZ;
+  float accX, accY, accZ, gyroX, gyroY, gyroZ, temperature;
+  rawAccX = buffer[0] << 8 | buffer[1];
+  rawAccY = buffer[2] << 8 | buffer[3];
+  rawAccZ = buffer[4] << 8 | buffer[5];
+
+  rawTemp = buffer[6] << 8 | buffer[7];
+
+  rawGyroX = buffer[8] << 8 | buffer[9];
+  rawGyroY = buffer[10] << 8 | buffer[11];
+  rawGyroZ = buffer[12] << 8 | buffer[13];
+
+  temperature = (rawTemp / 340.0) + 36.53;
+
+  // default for the driver
+  float accel_scale = MPU6050_RANGE_8_G;
+
+  // setup range dependant scaling
+  accX = ((float)rawAccX) / accel_scale;
+  accY = ((float)rawAccY) / accel_scale;
+  accZ = ((float)rawAccZ) / accel_scale;
+
+  // default for the driver
+  float gyro_scale = MPU6050_RANGE_1000_DEG;
+
+  gyroX = ((float)rawGyroX) / gyro_scale;
+  gyroY = ((float)rawGyroY) / gyro_scale;
+  gyroZ = ((float)rawGyroZ) / gyro_scale;
+
+  printf("## mpu6050 ##\n");
+  printf("x_accel: %.2f g\ny_accel: %.2f g\nz_accel: %.2f g\n", accX, accY, accZ);
+  printf("temp: %.2f\n", temperature);
+  printf("x_gyro: %.2f  dps\ny_gyro: %.2f dps\nz_gyro: %.2f dps\n", gyroX, gyroY, gyroZ);
+}
+
 int main(int argc, FAR char *argv[])
 {
   int ret;
@@ -210,6 +260,8 @@ int main(int argc, FAR char *argv[])
     read(gyro_fd, gyro_buf, len_gyro);
     gyro_val = (struct sensor_gyro *)gyro_buf;
 
+    
+
     if (poll(&fds, 1, -1) > 0)
     {
       if (read(baro_fd, baro_buf, len_baro) >= len_baro)
@@ -220,10 +272,7 @@ int main(int argc, FAR char *argv[])
 
     printf("## veml6070 ##\n");
     printf("uv: %d\n", uv_buf[0]);
-    printf("## mpu6050 ##\n");
-    printf("x_accel: %d\ny_accel: %d\nz_accel: %d\n", gyro_val->x_accel, gyro_val->y_accel, gyro_val->z_accel);
-    printf("temp: %d\n", gyro_val->temp);
-    printf("x_gyro: %d\ny_gyro: %d\nz_gyro: %d\n", gyro_val->x_gyro, gyro_val->y_gyro, gyro_val->z_gyro);
+    parse_gyro(gyro_buf);
     printf("## bmp280 ##\n");
     printf("timestamp: %llu\npress:%.2f (hPa)\ntemp:%.2f (C)\n",
            baro_val->timestamp, baro_val->pressure, baro_val->temperature);
@@ -232,7 +281,7 @@ int main(int argc, FAR char *argv[])
     write(lora_fd, (void *)&pkt, sizeof(pkt));
 #endif
 
-    sleep(5);
+    sleep(1);
   }
 
   free(gyro_buf);
