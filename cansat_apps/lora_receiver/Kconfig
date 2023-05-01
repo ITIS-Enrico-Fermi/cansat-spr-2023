@@ -1,0 +1,25 @@
+
+config CANSAT_APPS_LORA_RECEIVER
+	tristate "LoRa receiver test app"
+	default y
+	---help---
+		Enable the lora_receiver app
+
+if CANSAT_APPS_LORA_RECEIVER
+
+config CANSAT_APPS_LORA_RECEIVER_PROGNAME
+	string "Program name"
+	default "lora_receiver"
+	---help---
+		This is the name of the program that will be use when the NSH ELF
+		program is installed.
+
+config CANSAT_APPS_LORA_RECEIVER_PRIORITY
+	int "lora_receiver task priority"
+	default 100
+
+config CANSAT_APPS_LORA_RECEIVER_STACKSIZE
+	int "lora_receiver stack size"
+	default 2048
+
+endif

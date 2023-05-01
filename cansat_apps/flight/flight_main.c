@@ -103,6 +103,8 @@ struct sensor_baro /* Type: Barometer */
   float temperature;  /* Temperature in degrees celsius */
 };
 
+int lora_fd;
+
 int open_sensors(void)
 {
   uv_fd = open(UV_DEV_NAME, O_RDONLY);
@@ -124,7 +126,7 @@ int open_sensors(void)
     return -1;
   }
 #ifdef CONFIG_RF_RFM95
-  int lora_fd = open(RADIO_DEV_NAME, O_WRONLY);
+  lora_fd = open(RADIO_DEV_NAME, O_WRONLY);
   if (lora_fd < 0)
   {
     syslog(LOG_ERR, "Can't open file descriptor for radio module");
