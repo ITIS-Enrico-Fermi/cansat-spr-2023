@@ -421,7 +421,7 @@ int main(int argc, FAR char *argv[])
 
   printf("Init done!\n");
 
-  char msg[5] = {"Ciao!"};
+  char msg[5] = {"\xf5Ciao!"};
   for(int i=0;i<5;i++)
   {
    ret = write(fd, msg, sizeof(msg));

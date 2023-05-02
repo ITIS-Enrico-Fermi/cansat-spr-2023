@@ -6,7 +6,8 @@ const state_func_t state_table[] = {
     collect_state,
     recover_state};
 
-    
+
+int radio_fd;
 
 int main(int argc, FAR char *argv[])
 {

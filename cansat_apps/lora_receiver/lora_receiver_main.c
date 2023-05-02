@@ -17,7 +17,6 @@ struct pkt_t {
 
 size_t pkt_len;
 
-
 int main(int argc, FAR char *argv[]) {
   int ret;
   printf("LoRa receiver\n");
