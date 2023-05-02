@@ -8,7 +8,8 @@ STACKSIZE = $(CONFIG_CANSAT_APPS_FLIGHT_STACKSIZE)
 MODULE = $(CONFIG_CANSAT_APPS_FLIGHT)
 
 ASRCS =
-CSRCS =
+CSRCS = flight_senutils.c
+CSRCS = flight_fsm.c
 MAINSRC = flight_main.c
 
 include $(APPDIR)/Application.mk
