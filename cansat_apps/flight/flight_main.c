@@ -1,4 +1,5 @@
 #include <flight_fsm.h>
+#include <flight_senutils.h>
 
 // Dichiarazione della tabella di transizione degli stati
 const state_func_t state_table[] = {
@@ -6,8 +7,6 @@ const state_func_t state_table[] = {
     collect_state,
     recover_state};
 
-
-int radio_fd;
 
 int main(int argc, FAR char *argv[])
 {
@@ -33,6 +32,15 @@ int main(int argc, FAR char *argv[])
     .gyro_buf = gyro_buf,
     .uv_buf = uv_buf,
   };
+
+#ifdef CONFIG_RF_RFM95
+  int radio_fd = open(RADIO_DEV_NAME, O_WRONLY);
+  if (radio_fd < 0)
+  {
+      syslog(LOG_ERR, "Can't open file descriptor for radio module");
+      return ERROR;
+  }
+#endif
 
   ret = open_sensors();
   if (ret < 0)

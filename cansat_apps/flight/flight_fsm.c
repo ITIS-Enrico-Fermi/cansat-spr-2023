@@ -1,4 +1,5 @@
 #include <flight_fsm.h>
+#include <flight_senutils.h>
 
 // Funzioni di stato
 int idle_state(void *arg)

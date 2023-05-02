@@ -23,14 +23,6 @@ int open_sensors(void)
         syslog(LOG_ERR, "Can't open file descriptor for baro sensor");
         return -1;
     }
-#ifdef CONFIG_RF_RFM95
-    radio_fd = open(RADIO_DEV_NAME, O_WRONLY);
-    if (radio_fd < 0)
-    {
-        syslog(LOG_ERR, "Can't open file descriptor for radio module");
-        return -1;
-    }
-#endif
     return 0;
 }
 

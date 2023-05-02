@@ -1,6 +1,6 @@
 #pragma once
 
-#include <flight_senutils.h>
+#include <stdint.h>
 
 // State functions
 typedef int (*state_func_t)(void *);
