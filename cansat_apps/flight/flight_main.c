@@ -6,7 +6,7 @@ const state_func_t state_table[] = {
     collect_state,
     recover_state};
 
-bool stop = false;  // < stop condition
+    
 
 int main(int argc, FAR char *argv[])
 {

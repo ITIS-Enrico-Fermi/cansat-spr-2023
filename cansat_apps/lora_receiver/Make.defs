@@ -1,0 +1,4 @@
+
+ifneq ($(CONFIG_CANSAT_APPS_LORA_RECEIVER),)
+CONFIGURED_APPS += lora_receiver
+endif
