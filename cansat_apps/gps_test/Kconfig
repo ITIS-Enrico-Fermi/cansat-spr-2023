@@ -1,0 +1,39 @@
+
+config CANSAT_APPS_GPS_TEST
+	tristate "GPS test application"
+	default y
+	---help---
+		Enable the gps_test app
+
+if CANSAT_APPS_GPS_TEST
+
+config CANSAT_APPS_GPS_TEST_PROGNAME
+	string "Program name"
+	default "gps_test"
+	---help---
+		This is the name of the program that will be use when the NSH ELF
+		program is installed.
+
+config CANSAT_APPS_GPS_TEST_PRIORITY
+	int "gps_test task priority"
+	default 100
+
+config CANSAT_APPS_GPS_TEST_STACKSIZE
+	int "gps_test stack size"
+	default 2048
+
+
+choice
+	prompt "Event notification"
+	default CANSAT_APPS_GNSS_USE_POLL
+
+config CANSAT_APPS_GNSS_USE_POLL
+	bool "Polling notification"
+
+config CANSAT_APPS_GNSS_USE_SIGNAL
+	bool "Signal notification"
+
+endchoice # Event notification
+
+
+endif
