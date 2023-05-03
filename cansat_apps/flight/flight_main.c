@@ -56,6 +56,8 @@ int main(int argc, FAR char *argv[])
     return ERROR;
   }
 
+  /* TODO: SET EVERY SENSOR IN SLEEP MODE */
+
   // Loop principale della macchina a stati
   while(1) {
     // Chiamata alla funzione di stato corrente
