@@ -1,130 +1,48 @@
 #include <flight_senutils.h>
 
-int uv_fd, gyro_fd, baro_fd, radio_fd; // < file descriptors of sensors
-struct pollfd fds;
-
-int open_sensors(void)
+void parse_gps(FAR void *in, FAR void *out)
 {
-    uv_fd = open(UV_DEV_NAME, O_RDONLY);
-    if (uv_fd < 0)
-    {
-        syslog(LOG_ERR, "Can't open file descriptor for light sensor");
-        return -1;
+    int posfixflag;
+    struct cxd56_gnss_positiondata_s *posdat = (struct cxd56_gnss_positiondata_s *)in;
+    struct cxd56_gnss_dms_s dmf;
+    /* Print positioning data */
+    //printf(">Hour:%d, minute:%d, sec:%d, usec:%ld\n", posdat.receiver.time.hour, posdat.receiver.time.minute, posdat.receiver.time.sec, posdat.receiver.time.usec);
+    
+    if (posdat->receiver.pos_fixmode != CXD56_GNSS_PVT_POSFIX_INVALID) {
+      /* 2D fix or 3D fix.
+      * Convert latitude and longitude into dmf format and print it. */
+
+      posfixflag = 1;
+      printf(">LAT double: %lf\n", posdat->receiver.latitude);
+      printf(">LAT float: %f\n", (float)posdat->receiver.latitude);
+      double_to_dmf(posdat->receiver.latitude, &dmf);
+      printf(">LAT %d.%d.%04ld\n", dmf.degree, dmf.minute, dmf.frac);
+
+      printf(">LNG double: %lf\n", posdat->receiver.longitude);
+      printf(">LNG float: %f\n", (float)posdat->receiver.longitude);
+      double_to_dmf(posdat->receiver.longitude, &dmf);
+      printf(">LNG %d.%d.%04ld\n", dmf.degree, dmf.minute, dmf.frac);
+    } else {
+      /* No measurement. */
+
+      printf(">No Positioning Data\n");
     }
-    gyro_fd = open(GYRO_DEV_NAME, O_RDONLY);
-    if (gyro_fd < 0)
-    {
-        syslog(LOG_ERR, "Can't open file descriptor for gyro sensor");
-        return -1;
-    }
-    baro_fd = open(BARO_DEV_NAME, O_RDONLY | O_NONBLOCK);
-    if (baro_fd < 0)
-    {
-        syslog(LOG_ERR, "Can't open file descriptor for baro sensor");
-        return -1;
-    }
-    return 0;
 }
 
-int setup_sensors(void)
+void parse_gyro(void *in, void *out)
 {
-    int ret;
-    /* Start setup bmp280 */
-    unsigned int interval = 1000000;
-    unsigned int latency = 0;
-    ret = ioctl(baro_fd, SNIOC_SET_INTERVAL, interval);
-    if (ret < 0)
-    {
-        ret = -errno;
-        if (ret != -ENOTSUP)
-        {
-            printf("Failed to set interval for sensor:%s, ret:%s\n",
-                   "bmp280", strerror(errno));
-        }
-        return ERROR;
-    }
-
-    ret = ioctl(baro_fd, SNIOC_BATCH, latency);
-    if (ret < 0)
-    {
-        ret = -errno;
-        if (ret != -ENOTSUP)
-        {
-            printf("Failed to batch for sensor:%s, ret:%s\n",
-                   "bmp280", strerror(errno));
-        }
-        return ERROR;
-    }
-
-    fds.fd = baro_fd;
-    fds.events = POLLIN;
-
-    /* End setup bmp280 */
-    return 0;
-}
-
-void close_sensors(void)
-{
-    close(uv_fd);
-    close(gyro_fd);
-    close(baro_fd);
-}
-
-/****************************************************/
-/* READ SENSOR FUNCTIONS ****************************/
-/****************************************************/
-
-int read_baro(uint8_t *baro_buf, int len_baro)
-{
-    if (poll(&fds, 1, -1) > 0)
-    {
-        if (read(baro_fd, baro_buf, len_baro) >= len_baro)
-        {
-            // baro_val = (baro_t *)baro_buf;
-        }
-    }
-    return OK;
-}
-
-int read_gyro(uint8_t *gyro_buf, int len_gyro)
-{
-    int ret;
-    ret = read(gyro_fd, gyro_buf, len_gyro);
-    if (ret < 0)
-    {
-        printf("Error while reading gyro");
-        return ERROR;
-    }
-    // gyro_val = (gyro_t *)gyro_buf;
-    return OK;
-}
-
-int read_uv(uint8_t *uv_buf, int len_uv)
-{
-    int ret;
-    ret = read(uv_fd, uv_buf, len_uv);
-    if (ret < 0)
-    {
-        printf("Error while reading gyro");
-        return ERROR;
-    }
-    // uv_val = (uint8_t *)uv_buf;
-    return OK;
-}
-
-void parse_gyro(uint8_t *buffer)
-{
+    uint8_t *ubuffer = (uint8_t *) in;
     int16_t rawAccX, rawAccY, rawAccZ, rawTemp, rawGyroX, rawGyroY, rawGyroZ;
     float accX, accY, accZ, gyroX, gyroY, gyroZ, temperature;
-    rawAccX = buffer[0] << 8 | buffer[1];
-    rawAccY = buffer[2] << 8 | buffer[3];
-    rawAccZ = buffer[4] << 8 | buffer[5];
+    rawAccX = ubuffer[0] << 8 | ubuffer[1];
+    rawAccY = ubuffer[2] << 8 | ubuffer[3];
+    rawAccZ = ubuffer[4] << 8 | ubuffer[5];
 
-    rawTemp = buffer[6] << 8 | buffer[7];
+    rawTemp = ubuffer[6] << 8 | ubuffer[7];
 
-    rawGyroX = buffer[8] << 8 | buffer[9];
-    rawGyroY = buffer[10] << 8 | buffer[11];
-    rawGyroZ = buffer[12] << 8 | buffer[13];
+    rawGyroX = ubuffer[8] << 8 | ubuffer[9];
+    rawGyroY = ubuffer[10] << 8 | ubuffer[11];
+    rawGyroZ = ubuffer[12] << 8 | ubuffer[13];
 
     temperature = (rawTemp / 340.0) + 36.53;
 
@@ -147,4 +65,30 @@ void parse_gyro(uint8_t *buffer)
     printf("x_accel: %.2f g\ny_accel: %.2f g\nz_accel: %.2f g\n", accX, accY, accZ);
     printf("temp: %.2f\n", temperature);
     printf("x_gyro: %.2f  dps\ny_gyro: %.2f dps\nz_gyro: %.2f dps\n", gyroX, gyroY, gyroZ);
+}
+
+void double_to_dmf(double x, struct cxd56_gnss_dms_s *dmf)
+{
+  int    b;
+  int    d;
+  int    m;
+  double f;
+  double t;
+
+  if (x < 0) {
+      b = 1;
+      x = -x;
+  } else {
+    b = 0;
+  }
+
+  d = (int)x; /* = floor(x), x is always positive */
+  t = (x - d) * 60;
+  m = (int)t; /* = floor(t), t is always positive */
+  f = (t - m) * 10000;
+
+  dmf->sign   = b;
+  dmf->degree = d;
+  dmf->minute = m;
+  dmf->frac   = f;
 }

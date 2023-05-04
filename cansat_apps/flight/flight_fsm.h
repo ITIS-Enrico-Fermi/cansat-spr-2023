@@ -1,34 +1,20 @@
 #pragma once
 
-#include <stdint.h>
+#include <flight_senutils.h>
 
 // State functions
-typedef int (*state_func_t)(void *);
-
-// Data structure for idle state
-typedef struct
-{
-  uint8_t *baro_buf;
-  uint8_t *gyro_buf;
-  uint8_t *uv_buf;
-} idle_state_t;
-
-typedef struct
-{
-} collect_state_t;
-
-typedef struct
-{
-} recover_state_t;
+typedef int (*state_func_t)(void);
 
 // Routine prototypes
-int idle_state(void *arg);
-int collect_state(void *arg);
-int recover_state(void *arg);
+int boot_state(void);
+int idle_state(void);
+int collect_state(void);
+int recover_state(void);
 
 // Define main states
 typedef enum 
 {
+  BOOT,
   IDLE,
   COLLECT,
   RECOVER
