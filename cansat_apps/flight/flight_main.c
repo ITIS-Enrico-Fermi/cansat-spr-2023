@@ -11,8 +11,6 @@ const state_func_t state_table[] = {
 
 int main(int argc, FAR char *argv[])
 {
-  int ret;
-
   fsm_state current_state = BOOT;
 
   // Loop principale della macchina a stati
@@ -24,7 +22,6 @@ int main(int argc, FAR char *argv[])
       printf("Fatal error during inside fsm\n");
       return ERROR;
     }
-    sleep(2);
   }
 
   return 0;

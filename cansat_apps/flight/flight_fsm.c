@@ -1,4 +1,5 @@
 #include <flight_fsm.h>
+#include <math.h>
 
 int ret;
 int uv_fd, gyro_fd, baro_fd, camera_fd, gps_fd, radio_fd; // < file descriptors of sensors
@@ -20,6 +21,11 @@ static uint32_t posfixflag;
 static struct cxd56_gnss_positiondata_s posdat;
 int posperiod;
 sigset_t mask;
+
+#define ALTITUDE_LEN 100
+float pressureToAltitude(float pres);
+bool isLaunched(float pres);
+float *initCircularBuffer(int len);
 
 // Funzioni di stato
 int boot_state(void)
@@ -74,7 +80,7 @@ int boot_state(void)
     ret = -errno;
     if (ret != -ENOTSUP)
     {
-      printf("Failed to set interval for sensor:%s, ret:%s\n",
+      _info("Failed to set interval for sensor:%s, ret:%s\n",
              "bmp280", strerror(errno));
     }
     return ERROR;
@@ -85,7 +91,7 @@ int boot_state(void)
     ret = -errno;
     if (ret != -ENOTSUP)
     {
-      printf("Failed to batch for sensor:%s, ret:%s\n",
+      _info("Failed to batch for sensor:%s, ret:%s\n",
              "bmp280", strerror(errno));
     }
     return ERROR;
@@ -99,7 +105,7 @@ int boot_state(void)
   if (ret < 0)
   {
 
-    printf("Failed to reset radio0\n");
+    _info("Failed to reset radio0\n");
     return ERROR;
   }
   /* END SETUP RADIO0 IOCTL */
@@ -111,7 +117,7 @@ int boot_state(void)
   ret = sigprocmask(SIG_BLOCK, &mask, NULL);
   if (ret != OK)
   {
-    printf("sigprocmask failed. %d\n", ret);
+    _info("sigprocmask failed. %d\n", ret);
   }
 
   /* Set the signal to notify GNSS events. */
@@ -125,7 +131,7 @@ int boot_state(void)
   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SIGNAL_SET, &setting);
   if (ret < 0)
   {
-    printf("Error while configuring signalling\n");
+    _info("Error while configuring signalling\n");
     return -1;
   }
 
@@ -143,7 +149,7 @@ int boot_state(void)
   
   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SET_OPE_MODE, &operation_mode_config);
   if (ret < 0) {
-    printf("Error setting Operation Mode via ioctl. Return code: %d\n", ret);
+    _info("Error setting Operation Mode via ioctl. Return code: %d\n", ret);
     return ret;
   }
 
@@ -152,7 +158,7 @@ int boot_state(void)
 
   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SELECT_SATELLITE_SYSTEM, set_satellite);
   if (ret < 0) {
-    printf("Can't set satellite system.\n");
+    _info("Can't set satellite system.\n");
     return ret;
   }
   /* END set GNSS parameters. */
@@ -166,9 +172,9 @@ int boot_state(void)
   /* Start GNSS. */
   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_START, CXD56_GNSS_STMOD_HOT);
   if (ret < 0)
-    printf("Error while starting GNSS in Hot Mode. Error code: %d\n", errno);
+    _info("Error while starting GNSS in Hot Mode. Error code: %d\n", errno);
   else
-    syslog(LOG_INFO, "GNSS subsystem started correctly.");
+    syslog(LOG_INFO, "GNSS subsystem started correctly.\n");
 
   /* END SETUP GPS0 IOCTL */
 
@@ -178,19 +184,17 @@ int boot_state(void)
   }
   else
   {
+    _info("Switching state from BOOT to IDLE\n");
     return IDLE;
   }
 
-  printf("FATAL: ERROR OCCURED ON BOOT!!\n");
+  _info("FATAL: ERROR OCCURED ON BOOT!!\n");
   return ERROR;
 }
 
 int idle_state(void)
 {
   baro_t *baro;
-  gyro_t *gyro;
-  uint8_t *uv;
-  uint8_t *p;
 
   // read baro
   if (poll(&fds, 1, -1) > 0)
@@ -204,37 +208,12 @@ int idle_state(void)
     }
   }
   baro = (baro_t *) baro_buf;
-  ret = read(gyro_fd, baro_buf, len_baro);
-  if (ret < 0)
-  {
-    printf("Can't read baro0\n");
-    return ERROR;
-  }
-  ret = read(gyro_fd, gyro_buf, len_gyro);
-  if (ret < 0)
-  {
-    printf("Can't read gyro0\n");
-    return ERROR;
-  }
-  gyro = (gyro_t *)gyro_buf;
-  ret = read(uv_fd, uv_buf, len_uv);
-  if (ret < 0)
-  {
-    printf("Can't read uv0\n");
-    return ERROR;
-  }
-
-  printf("## veml6070 ##\n");
-  printf("uv: %d\n", uv_buf[0]);
-  parse_gyro(gyro_buf, p); // only for debug
-  printf("## bmp280 ##\n");
-  printf("timestamp: %llu\npress:%.2f (hPa)\ntemp:%.2f (C)\n",
-         baro->timestamp, baro->pressure, baro->temperature);
 
   ret = sigwaitinfo(&mask, NULL);
+  _info("GPS signal received!\n");
   if (ret != GNSS_USERSPACE_SIG)
   {
-    printf("Waited signal, but instead of GNSS signal got: %d\n", ret);
+    _info("Waited signal, but instead of GNSS signal got: %d\n", ret);
     return ERROR;
   }
 
@@ -242,28 +221,97 @@ int idle_state(void)
   ret = read(gps_fd, &posdat, sizeof(posdat));
   if (ret < 0)
   {
-    printf("Can't read gps0\n");
+    _info("Can't read gps0\n");
     return ERROR;
   }
-  parse_gps(&posdat, p);
   // ...comportamento di IDLE...
 
-  // Controllo della condizione per passare allo stato COLLECT
-  if (false)
+  /* FSM IDLE --> COLLECT CONDITION:
+   * altitude should be 300m high at least
+   */
+  float altitude = pressureToAltitude((float)baro->pressure);
+  _info("altitude: %f\n", altitude);
+  _info("Checking fsm state condition\n");
+  if (isLaunched(altitude))
   {
+    _info("Switching state from IDLE to COLLECT");
     return COLLECT;
   }
+  sleep(5);
   return IDLE;
 }
 
 int collect_state(void)
 {
+  baro_t *baro;
+  gyro_t *gyro;
+  gnss_t *gps;
+  uint8_t *uv;
+
+  /* Wait baro data. */
+  if (poll(&fds, 1, -1) > 0)
+  {
+    if (read(baro_fd, baro_buf, len_baro) >= len_baro)
+    {
+    }
+    else
+    {
+      return ERROR;
+    }
+  }
+  baro = (baro_t *) baro_buf;
+  /* Wait gyro data. */
+  ret = read(gyro_fd, gyro_buf, len_gyro);
+  if (ret < 0)
+  {
+    _info("Can't read baro0\n");
+    return ERROR;
+  }
+  gyro = (gyro_t *)gyro_buf;
+  /* Wait GPS data. */
+  ret = sigwaitinfo(&mask, NULL);
+  if (ret != GNSS_USERSPACE_SIG)
+  {
+    _info("Waited signal, but instead of GNSS signal got: %d\n", ret);
+    return ERROR;
+  }
+  /* Read and print POS data. */
+  ret = read(gps_fd, &posdat, sizeof(posdat));
+  if (ret < 0)
+  {
+    _info("Can't read gps0\n");
+    return ERROR;
+  }
+  parse_gps(&posdat, gps);
+  
   // ...comportamento di COLLECT...
+  ret = read(uv_fd, uv_buf, len_uv);
+  if (ret < 0)
+  {
+    _info("Can't read uv0\n");
+    return ERROR;
+  }
+
+  pkt.pressure = baro->pressure;
+  pkt.gps = *gps;
+  pkt.gyro = *gyro;
+  pkt.uv = *uv;
+  pkt.counter++;
+
+  ret = write(radio_fd, &pkt, sizeof(struct lora_packet));
+  _info("LoRa packet inside:\n");
+  _info("pres: %f\n", pkt.pressure);
+  _info("accelx %d; accely %d; accelz %d", pkt.gyro.accel.x, pkt.gyro.accel.y, pkt.gyro.accel.z);
+  _info("temp %d", pkt.gyro.temp);
+  _info("rotox %d; rotoy %d; rotoz %d", pkt.gyro.roto.x, pkt.gyro.roto.y, pkt.gyro.roto.z);
+  _info("lat: %f; lon: %f", pkt.gps.latitude, pkt.gps.longitude);
+  _info("uv: %d", pkt.uv);
 
   if (false)
   {
     return RECOVER;
   }
+  sleep(5);
   return COLLECT;
 }
 
@@ -280,3 +328,50 @@ int recover_state(void)
  * Cansat never ends.. you'll see us again.
  * soon.
  */
+
+bool isLaunched(float alt)
+{
+  static int cindex = 0;
+  static float *circularAltitude = NULL;
+  bool result = false;
+
+  if (circularAltitude == NULL)
+  {
+    initCircularBuffer(ALTITUDE_LEN);
+  }
+
+  for (int i=0; i<ALTITUDE_LEN; i++)
+  {
+    if(alt - 300 > circularAltitude[i]){
+      _info("Detected lauch from %f to %f at %d^ round", circularAltitude[i], alt, i);
+      result = true;
+      break;
+    }
+  }
+  circularAltitude[cindex] = alt;
+  cindex++;
+  if(cindex == ALTITUDE_LEN)
+  {
+    cindex = 0;
+  }
+
+  return result;
+}
+
+float *initCircularBuffer(int len) {
+  float *circularBuffer = malloc(sizeof(float) * len);
+  for (int i=0;i<len;i++)
+  {
+    circularBuffer[i] = 0;
+  }
+  return circularBuffer;
+}
+
+float pressureToAltitude(float pres) {
+    pres *= 100.0f; // converti la pressione da hPa a Pa
+    const float seaLevelPressure = 101325.0f; // pressione a livello del mare (Pa)
+    const float altitudeFactor = 44330.0f; // fattore di conversione altitudine/pressione (m/Pa)
+    const float pressureSeaLevel = pres / seaLevelPressure; // pressione relativa al livello del mare
+    float altitude = altitudeFactor * (1.0f - powf(pressureSeaLevel, 0.1903f));
+    return altitude;
+}

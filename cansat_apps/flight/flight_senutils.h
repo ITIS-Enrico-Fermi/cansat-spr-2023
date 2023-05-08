@@ -91,6 +91,13 @@ struct __attribute__((__packed__)) cxd56_gnss_dms_s
 };
 void double_to_dmf(double x, struct cxd56_gnss_dms_s *dmf);
 
+struct __attribute__((__packed__)) cxd56_gnss_latlon_s
+{
+  float latitude;
+  float longitude;
+};
+typedef struct cxd56_gnss_latlon_s gnss_t;
+
 /**
  * Structure of the packet that will be sent to the ground station.
  *
@@ -98,8 +105,9 @@ void double_to_dmf(double x, struct cxd56_gnss_dms_s *dmf);
  */
 struct __attribute__((__packed__)) lora_packet
 {
-  gyro_t position;
-  uint8_t light;
   float pressure;
+  gyro_t gyro;
+  gnss_t gps;
+  uint8_t uv;
   uint16_t counter; // < monotonic packet counter
 };
