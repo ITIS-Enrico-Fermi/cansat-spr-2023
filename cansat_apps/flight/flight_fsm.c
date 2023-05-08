@@ -21,6 +21,9 @@ static uint32_t posfixflag;
 static struct cxd56_gnss_positiondata_s posdat;
 int posperiod;
 sigset_t mask;
+const struct timespec waitgps = {
+    .tv_sec = 3,
+    .tv_nsec = 0};
 
 #define ALTITUDE_LEN 100
 float pressureToAltitude(float pres);
@@ -81,7 +84,7 @@ int boot_state(void)
     if (ret != -ENOTSUP)
     {
       _info("Failed to set interval for sensor:%s, ret:%s\n",
-             "bmp280", strerror(errno));
+            "bmp280", strerror(errno));
     }
     return ERROR;
   }
@@ -92,7 +95,7 @@ int boot_state(void)
     if (ret != -ENOTSUP)
     {
       _info("Failed to batch for sensor:%s, ret:%s\n",
-             "bmp280", strerror(errno));
+            "bmp280", strerror(errno));
     }
     return ERROR;
   }
@@ -143,12 +146,13 @@ int boot_state(void)
    * frequency of a new position from the chip.
    */
   struct cxd56_gnss_ope_mode_param_s operation_mode_config = {
-    .mode = 1,
-    .cycle = 1000   // in milliseconds
+      .mode = 1,
+      .cycle = 1000 // in milliseconds
   };
-  
+
   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SET_OPE_MODE, &operation_mode_config);
-  if (ret < 0) {
+  if (ret < 0)
+  {
     _info("Error setting Operation Mode via ioctl. Return code: %d\n", ret);
     return ret;
   }
@@ -157,7 +161,8 @@ int boot_state(void)
   set_satellite = CXD56_GNSS_SAT_GPS | CXD56_GNSS_SAT_GLONASS;
 
   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SELECT_SATELLITE_SYSTEM, set_satellite);
-  if (ret < 0) {
+  if (ret < 0)
+  {
     _info("Can't set satellite system.\n");
     return ret;
   }
@@ -197,6 +202,7 @@ int idle_state(void)
   baro_t *baro;
 
   // read baro
+  _info("Reading baro..\n");
   if (poll(&fds, 1, -1) > 0)
   {
     if (read(baro_fd, baro_buf, len_baro) >= len_baro)
@@ -207,15 +213,14 @@ int idle_state(void)
       return ERROR;
     }
   }
-  baro = (baro_t *) baro_buf;
-
-  ret = sigwaitinfo(&mask, NULL);
-  _info("GPS signal received!\n");
+  baro = (baro_t *)baro_buf;
+  _info("waiting gps signal..\n");
+  ret = sigtimedwait(&mask, NULL, &waitgps);
+  //ret = sigwaitinfo(&mask, NULL);
   if (ret != GNSS_USERSPACE_SIG)
   {
     _info("Waited signal, but instead of GNSS signal got: %d\n", ret);
-    return ERROR;
-  }
+  }else _info("GPS signal received!\n");
 
   /* Read and print POS data. */
   ret = read(gps_fd, &posdat, sizeof(posdat));
@@ -231,12 +236,12 @@ int idle_state(void)
    */
   float altitude = pressureToAltitude((float)baro->pressure);
   _info("altitude: %f\n", altitude);
-  _info("Checking fsm state condition\n");
   if (isLaunched(altitude))
   {
     _info("Switching state from IDLE to COLLECT");
     return COLLECT;
   }
+  _info("Sleeping..\n");
   sleep(5);
   return IDLE;
 }
@@ -259,7 +264,7 @@ int collect_state(void)
       return ERROR;
     }
   }
-  baro = (baro_t *) baro_buf;
+  baro = (baro_t *)baro_buf;
   /* Wait gyro data. */
   ret = read(gyro_fd, gyro_buf, len_gyro);
   if (ret < 0)
@@ -269,7 +274,8 @@ int collect_state(void)
   }
   gyro = (gyro_t *)gyro_buf;
   /* Wait GPS data. */
-  ret = sigwaitinfo(&mask, NULL);
+  ret = sigtimedwait(&mask, NULL, &waitgps);
+  // ret = sigwaitinfo(&mask, NULL); // we don't like blocking methods
   if (ret != GNSS_USERSPACE_SIG)
   {
     _info("Waited signal, but instead of GNSS signal got: %d\n", ret);
@@ -283,7 +289,7 @@ int collect_state(void)
     return ERROR;
   }
   parse_gps(&posdat, gps);
-  
+
   // ...comportamento di COLLECT...
   ret = read(uv_fd, uv_buf, len_uv);
   if (ret < 0)
@@ -337,12 +343,15 @@ bool isLaunched(float alt)
 
   if (circularAltitude == NULL)
   {
-    initCircularBuffer(ALTITUDE_LEN);
+    _info("Circularbuffer initialized\n");
+    circularAltitude = initCircularBuffer(ALTITUDE_LEN);
   }
 
-  for (int i=0; i<ALTITUDE_LEN; i++)
+  _info("Scrolling through conditions\n");
+  for (int i = 0; i < ALTITUDE_LEN; i++)
   {
-    if(alt - 300 > circularAltitude[i]){
+    if (alt - 300 > circularAltitude[i])
+    {
       _info("Detected lauch from %f to %f at %d^ round", circularAltitude[i], alt, i);
       result = true;
       break;
@@ -350,7 +359,7 @@ bool isLaunched(float alt)
   }
   circularAltitude[cindex] = alt;
   cindex++;
-  if(cindex == ALTITUDE_LEN)
+  if (cindex == ALTITUDE_LEN)
   {
     cindex = 0;
   }
@@ -358,20 +367,22 @@ bool isLaunched(float alt)
   return result;
 }
 
-float *initCircularBuffer(int len) {
+float *initCircularBuffer(int len)
+{
   float *circularBuffer = malloc(sizeof(float) * len);
-  for (int i=0;i<len;i++)
+  for (int i = 0; i < len; i++)
   {
     circularBuffer[i] = 0;
   }
   return circularBuffer;
 }
 
-float pressureToAltitude(float pres) {
-    pres *= 100.0f; // converti la pressione da hPa a Pa
-    const float seaLevelPressure = 101325.0f; // pressione a livello del mare (Pa)
-    const float altitudeFactor = 44330.0f; // fattore di conversione altitudine/pressione (m/Pa)
-    const float pressureSeaLevel = pres / seaLevelPressure; // pressione relativa al livello del mare
-    float altitude = altitudeFactor * (1.0f - powf(pressureSeaLevel, 0.1903f));
-    return altitude;
+float pressureToAltitude(float pres)
+{
+  pres *= 100.0f;                                         // converti la pressione da hPa a Pa
+  const float seaLevelPressure = 101325.0f;               // pressione a livello del mare (Pa)
+  const float altitudeFactor = 44330.0f;                  // fattore di conversione altitudine/pressione (m/Pa)
+  const float pressureSeaLevel = pres / seaLevelPressure; // pressione relativa al livello del mare
+  float altitude = altitudeFactor * (1.0f - powf(pressureSeaLevel, 0.1903f));
+  return altitude;
 }
