@@ -14,9 +14,9 @@ void parse_gps(FAR void *in, FAR void *out)
   else
   {
     /* No measurement. */
-    postransform->latitude = 0.0F;
-    postransform->longitude = 0.0F;
-    _err(">No Positioning Data\n");
+    postransform->latitude = 104.0F;
+    postransform->longitude = 104.0F;
+    snwarn(">No Positioning Data\n");
   }
 }
 

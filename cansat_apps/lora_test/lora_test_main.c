@@ -58,6 +58,7 @@
 #include <nuttx/config.h>
 #include <debug.h>
 #include <arch/chip/gnss.h> //gnss driver structures
+#include <flight_senutils.h>
 
 #define GNSS_POLL_FD_NUM 1
 #define GNSS_POLL_TIMEOUT_FOREVER -1
@@ -76,13 +77,6 @@ const struct timespec waitgps = {
     .tv_sec = 10,
     .tv_nsec = 0};
 
-
-struct __attribute__((__packed__)) cxd56_gnss_latlon_s
-{
-  float latitude;
-  float longitude;
-};
-typedef struct cxd56_gnss_latlon_s gnss_t;
 /*
  * Test SPI driver before writing a stable library
  * library will offer a fast and easy way to use rfm95 device.
@@ -109,6 +103,7 @@ int main(int argc, FAR char *argv[])
 {
    int ret, gps_fd;
    gnss_t gps;
+   struct lora_packet pkt = {.counter = 0};
    printf("RFM95 driver test app\n");
 
    gps_fd = open(GPS_DEV_NAME, O_RDONLY);
@@ -222,7 +217,10 @@ int main(int argc, FAR char *argv[])
       }
       parse_gps(&posdat, &gps);
       printf("LAT: %f\nLON: %f\n", gps.latitude, gps.longitude);
-      write(fd, &gps, sizeof(gnss_t));
+      pkt.gps.latitude = gps.latitude;
+      pkt.gps.longitude = gps.longitude;
+      pkt.counter++;
+      write(fd, &pkt, sizeof(struct lora_packet));
       up_mdelay(1000);
    }
 

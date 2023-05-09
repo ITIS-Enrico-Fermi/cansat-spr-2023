@@ -3,20 +3,25 @@
 #include <arch/chip/gnss.h> //gnss driver structures
 #include <isxcamera.h>  //custom camera library utils
 
+/* TODO check every error condition consequence */
+
+#define ALTITUDE_STABILIZE 5
+
 int ret;
 int uv_fd, gyro_fd, baro_fd, camera_fd, gps_fd, radio_fd; // < file descriptors of sensors
 struct pollfd fds;
+
+/* Sensors data */
+baro_t baro;
+gyro_t gyro;
+uint16_t uv;
+gnss_t gps;
 struct lora_packet pkt = {.counter = 0};
 
 /* Define structure length */
 int len_baro = sizeof(baro_t);
 int len_gyro = sizeof(gyro_t);
 int len_uv = sizeof(uint16_t);
-
-/* Allocate buffer space */
-uint8_t *baro_buf;
-uint8_t *gyro_buf;
-uint8_t *uv_buf;
 
 /* GPS data */
 static uint32_t posfixflag;
@@ -27,18 +32,12 @@ const struct timespec waitgps = {
     .tv_sec = 3,
     .tv_nsec = 0};
 
-#define ALTITUDE_LEN 100
+float ground_altitude = 0;
 float pressureToAltitude(float pres);
-bool isLaunched(float pres);
-float *initCircularBuffer(int len);
 
 // Funzioni di stato
 int boot_state(void)
 {
-  baro_buf = malloc(len_baro);
-  gyro_buf = malloc(len_gyro);
-  uv_buf = malloc(len_uv);
-
   radio_fd = open(RADIO_DEV_NAME, O_WRONLY);
   if (radio_fd < 0)
   {
@@ -196,125 +195,139 @@ int boot_state(void)
   }
 
   _info("FATAL: ERROR OCCURED ON BOOT!!\n");
+  /* TODO: reboot here */
   return ERROR;
 }
 
+/* Idle state is focused on LOW POWER MODE and LAUNCH DETECTION */
 int idle_state(void)
 {
-  baro_t *baro;
-
+  uint8_t calibrateCounter = ALTITUDE_STABILIZE;
+  float new_altitude = 0;
   // read baro
   _info("Reading baro..\n");
   if (poll(&fds, 1, -1) > 0)
   {
-    if (read(baro_fd, baro_buf, len_baro) >= len_baro)
+    if (read(baro_fd, &baro, len_baro) >= len_baro)
     {
     }
     else
     {
-      return ERROR;
+      snerr("Can't read baro0\n");
     }
   }
-  baro = (baro_t *)baro_buf;
-  _info("waiting gps signal..\n");
   ret = sigtimedwait(&mask, NULL, &waitgps);
-  //ret = sigwaitinfo(&mask, NULL);
   if (ret != GNSS_USERSPACE_SIG)
+  { 
+    snerr("Waited signal, but instead of GNSS signal got: %d\n", ret);
+  }
+  else /* We read gps from the beginning since it takes minutes to sync from boot */
   {
-    _info("Waited signal, but instead of GNSS signal got: %d\n", ret);
-  }else _info("GPS signal received!\n");
-
-  /* Read and print POS data. */
   ret = read(gps_fd, &posdat, sizeof(posdat));
   if (ret < 0)
   {
-    _info("Can't read gps0\n");
-    return ERROR;
+    snerr("Can't read gps0\n");
   }
-  // ...comportamento di IDLE...
+  }
 
   /* FSM IDLE --> COLLECT CONDITION:
    * altitude should be 300m high at least
    */
-  float altitude = pressureToAltitude((float)baro->pressure);
-  _info("altitude: %f\n", altitude);
-  if (isLaunched(altitude))
+  new_altitude = pressureToAltitude((float)baro.pressure);
+  _info("new_altitude = %f\n", new_altitude);
+
+  /* Altitude calibration takes ALTITUDE_STABILIZE * 2 seconds */
+  if(calibrateCounter > 0)
+  {
+    ground_altitude += new_altitude;
+    calibrateCounter--;
+    if(calibrateCounter == 0)
+    {
+      ground_altitude /= (float)ALTITUDE_STABILIZE;
+      _info("ground_altitude is %f", ground_altitude);
+    }
+    sleep(2); 
+    return IDLE;
+  }
+
+  /* When cansat gets at least 400m higher then ground */
+  if (new_altitude - 400 > ground_altitude)
   {
     _info("Switching state from IDLE to COLLECT");
     return COLLECT;
   }
-  _info("Sleeping..\n");
   sleep(5);
   return IDLE;
 }
 
+/* COLLECT state is the crucial phase. Every measure is taken here */
 int collect_state(void)
 {
-  baro_t *baro;
-  gyro_t *gyro;
-  gnss_t *gps;
-  uint8_t *uv;
-
-  /* Wait baro data. */
+  /* Read baro data. */
   if (poll(&fds, 1, -1) > 0)
   {
-    if (read(baro_fd, baro_buf, len_baro) >= len_baro)
+    if (read(baro_fd, &baro, len_baro) >= len_baro)
     {
     }
     else
     {
-      return ERROR;
+      snerr("Can't read baro0\n");
     }
   }
-  baro = (baro_t *)baro_buf;
-  /* Wait gyro data. */
-  ret = read(gyro_fd, gyro_buf, len_gyro);
+  /* Read gyro data. */
+  ret = read(gyro_fd, &gyro, len_gyro);
   if (ret < 0)
   {
-    _info("Can't read baro0\n");
-    return ERROR;
+    snerr("Can't read gyro0\n");
   }
-  gyro = (gyro_t *)gyro_buf;
   /* Wait GPS data. */
   ret = sigtimedwait(&mask, NULL, &waitgps);
-  // ret = sigwaitinfo(&mask, NULL); // we don't like blocking methods
   if (ret != GNSS_USERSPACE_SIG)
-  {
-    _info("Waited signal, but instead of GNSS signal got: %d\n", ret);
-    return ERROR;
+  { 
+    gps.latitude = 102.0F; //error code
+    gps.longitude = 102.F; //error code
+    snerr("Waited signal, but instead of GNSS signal got: %d\n", ret);
   }
-  /* Read and print POS data. */
+  else /* Read only if there's usefull data */
+  {
   ret = read(gps_fd, &posdat, sizeof(posdat));
   if (ret < 0)
   {
-    _info("Can't read gps0\n");
-    return ERROR;
+    snerr("Can't read gps0\n");
   }
-  parse_gps(&posdat, gps);
+  else
+  {
+    parse_gps(&posdat, &gps);
+  }
+  }
 
   // ...comportamento di COLLECT...
-  ret = read(uv_fd, uv_buf, len_uv);
+  ret = read(uv_fd, &uv, len_uv);
   if (ret < 0)
   {
     _info("Can't read uv0\n");
     return ERROR;
   }
+  uint8_t *uv_ptr = (uint8_t *)&uv;
 
-  pkt.pressure = baro->pressure;
-  pkt.gps = *gps;
-  pkt.gyro = *gyro;
-  pkt.uv = *uv;
+  pkt.pressure = baro.pressure;
+  pkt.gps = gps;
+  pkt.gyro = gyro;
+  pkt.uv = uv_ptr[0];
   pkt.counter++;
 
   ret = write(radio_fd, &pkt, sizeof(struct lora_packet));
   _info("LoRa packet inside:\n");
   _info("pres: %f\n", pkt.pressure);
-  _info("accelx %d; accely %d; accelz %d", pkt.gyro.accel.x, pkt.gyro.accel.y, pkt.gyro.accel.z);
-  _info("temp %d", pkt.gyro.temp);
-  _info("rotox %d; rotoy %d; rotoz %d", pkt.gyro.roto.x, pkt.gyro.roto.y, pkt.gyro.roto.z);
-  _info("lat: %f; lon: %f", pkt.gps.latitude, pkt.gps.longitude);
-  _info("uv: %d", pkt.uv);
+  _info("accelx %d; accely %d; accelz %d\n", pkt.gyro.accel.x, pkt.gyro.accel.y, pkt.gyro.accel.z);
+  _info("temp %d\n", pkt.gyro.temp);
+  _info("rotox %d; rotoy %d; rotoz %d\n", pkt.gyro.roto.x, pkt.gyro.roto.y, pkt.gyro.roto.z);
+  _info("lat: %f; lon: %f\n", pkt.gps.latitude, pkt.gps.longitude);
+  _info("uv: %d\n", pkt.uv);
+  _info("uv: %d\n", pkt.uv);
+  _info("counter: %d\n", pkt.counter);
 
+  /* TODO COLLECT --> RECOVER condition */
   if (false)
   {
     return RECOVER;
@@ -336,48 +349,6 @@ int recover_state(void)
  * Cansat never ends.. you'll see us again.
  * soon.
  */
-
-bool isLaunched(float alt)
-{
-  static int cindex = 0;
-  static float *circularAltitude = NULL;
-  bool result = false;
-
-  if (circularAltitude == NULL)
-  {
-    _info("Circularbuffer initialized\n");
-    circularAltitude = initCircularBuffer(ALTITUDE_LEN);
-  }
-
-  _info("Scrolling through conditions\n");
-  for (int i = 0; i < ALTITUDE_LEN; i++)
-  {
-    if (alt - 300 > circularAltitude[i])
-    {
-      _info("Detected lauch from %f to %f at %d^ round", circularAltitude[i], alt, i);
-      result = true;
-      break;
-    }
-  }
-  circularAltitude[cindex] = alt;
-  cindex++;
-  if (cindex == ALTITUDE_LEN)
-  {
-    cindex = 0;
-  }
-
-  return result;
-}
-
-float *initCircularBuffer(int len)
-{
-  float *circularBuffer = malloc(sizeof(float) * len);
-  for (int i = 0; i < len; i++)
-  {
-    circularBuffer[i] = 0;
-  }
-  return circularBuffer;
-}
 
 float pressureToAltitude(float pres)
 {
