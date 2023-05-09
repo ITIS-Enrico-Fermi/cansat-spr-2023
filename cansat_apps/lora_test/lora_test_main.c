@@ -73,7 +73,7 @@ static struct cxd56_gnss_positiondata_s posdat;
 int posperiod;
 sigset_t mask;
 const struct timespec waitgps = {
-    .tv_sec = 3,
+    .tv_sec = 10,
     .tv_nsec = 0};
 
 
@@ -99,8 +99,8 @@ void parse_gps(FAR void *in, FAR void *out)
   else
   {
     /* No measurement. */
-    postransform->latitude = 0.0F;
-    postransform->longitude = 0.0F;
+    postransform->latitude = 104.0F;
+    postransform->longitude = 104.0F;
     _err(">No Positioning Data\n");
   }
 }
@@ -108,7 +108,7 @@ void parse_gps(FAR void *in, FAR void *out)
 int main(int argc, FAR char *argv[])
 {
    int ret, gps_fd;
-   gnss_t *gps;
+   gnss_t gps;
    printf("RFM95 driver test app\n");
 
    gps_fd = open(GPS_DEV_NAME, O_RDONLY);
@@ -117,60 +117,75 @@ int main(int argc, FAR char *argv[])
       syslog(LOG_ERR, "Can't open GNSS character device at %s. Error code: %d\n", GPS_DEV_NAME, errno);
       return ERROR;
    }
-   /* START SETUP GPS0 IOCTL */
-   /* Prepare a signal set and enable GNSS signal only. */
-   sigemptyset(&mask);
-   sigaddset(&mask, GNSS_USERSPACE_SIG);
-   ret = sigprocmask(SIG_BLOCK, &mask, NULL);
-   if (ret != OK)
-   {
-      _info("sigprocmask failed. %d\n", ret);
-   }
+  /* START SETUP GPS0 IOCTL */
+  /* Prepare a signal set and enable GNSS signal only. */
+  sigemptyset(&mask);
+  sigaddset(&mask, GNSS_USERSPACE_SIG);
+  ret = sigprocmask(SIG_BLOCK, &mask, NULL);
+  if (ret != OK)
+  {
+    _info("sigprocmask failed. %d\n", ret);
+  }
 
-   /* Set the signal to notify GNSS events. */
-   struct cxd56_gnss_signal_setting_s setting = {
-       .fd = gps_fd,
-       .enable = true,
-       .gnsssig = CXD56_GNSS_SIG_GNSS,
-       .signo = GNSS_USERSPACE_SIG,
-       .data = NULL};
+  /* Set the signal to notify GNSS events. */
+  struct cxd56_gnss_signal_setting_s setting = {
+      .fd = gps_fd,
+      .enable = true,
+      .gnsssig = CXD56_GNSS_SIG_GNSS,
+      .signo = GNSS_USERSPACE_SIG,
+      .data = NULL};
 
-   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SIGNAL_SET, &setting);
-   if (ret < 0)
-   {
-      _info("Error while configuring signalling\n");
-      return -1;
-   }
+  ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SIGNAL_SET, &setting);
+  if (ret < 0)
+  {
+    _info("Error while configuring signalling\n");
+    return -1;
+  }
 
-   /* START set GNSS parameters. */
-   uint32_t set_satellite;
+  /* START set GNSS parameters. */
+  uint32_t set_satellite;
 
-   /*
-    * Set the operation mode (always 1) and the notify cycle, which is the
-    * frequency of a new position from the chip.
-    */
-   struct cxd56_gnss_ope_mode_param_s operation_mode_config = {
-       .mode = 1,
-       .cycle = 1000 // in milliseconds
-   };
+  /*
+   * Set the operation mode (always 1) and the notify cycle, which is the
+   * frequency of a new position from the chip.
+   */
+  struct cxd56_gnss_ope_mode_param_s operation_mode_config = {
+      .mode = 1,
+      .cycle = 1000 // in milliseconds
+  };
 
-   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SET_OPE_MODE, &operation_mode_config);
-   if (ret < 0)
-   {
-      _info("Error setting Operation Mode via ioctl. Return code: %d\n", ret);
-      return ret;
-   }
+  ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SET_OPE_MODE, &operation_mode_config);
+  if (ret < 0)
+  {
+    _info("Error setting Operation Mode via ioctl. Return code: %d\n", ret);
+    return ret;
+  }
 
-   /* Set the type of satellite system used by GNSS. */
-   set_satellite = CXD56_GNSS_SAT_GPS | CXD56_GNSS_SAT_GLONASS;
+  /* Set the type of satellite system used by GNSS. */
+  set_satellite = CXD56_GNSS_SAT_GPS | CXD56_GNSS_SAT_GLONASS;
 
-   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SELECT_SATELLITE_SYSTEM, set_satellite);
-   if (ret < 0)
-   {
-      _info("Can't set satellite system.\n");
-      return ret;
-   }
-   /* END set GNSS parameters. */
+  ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SELECT_SATELLITE_SYSTEM, set_satellite);
+  if (ret < 0)
+  {
+    _info("Can't set satellite system.\n");
+    return ret;
+  }
+  /* END set GNSS parameters. */
+
+  /* Initial positioning measurement becomes cold start if specified hot
+   * start, so working period should be long term to receive ephemeris. */
+
+  posperiod = 200;
+  posfixflag = 0;
+
+  /* Start GNSS. */
+  ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_START, CXD56_GNSS_STMOD_HOT);
+  if (ret < 0)
+    _info("Error while starting GNSS in Hot Mode. Error code: %d\n", errno);
+  else
+    syslog(LOG_INFO, "GNSS subsystem started correctly.\n");
+
+  /* END SETUP GPS0 IOCTL */
 
    int fd = open(DEV_NAME, O_RDWR);
    if (fd < 0)
@@ -205,9 +220,10 @@ int main(int argc, FAR char *argv[])
          _info("Can't read gps0\n");
          return ERROR;
       }
-      parse_gps(&posdat, gps);
-      write(fd, gps, sizeof(gnss_t));
-      up_mdelay(5000);
+      parse_gps(&posdat, &gps);
+      printf("LAT: %f\nLON: %f\n", gps.latitude, gps.longitude);
+      write(fd, &gps, sizeof(gnss_t));
+      up_mdelay(1000);
    }
 
    close(fd);
