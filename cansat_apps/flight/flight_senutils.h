@@ -14,9 +14,6 @@
 #include <nuttx/config.h>
 #include <debug.h>
 
-#include <arch/chip/gnss.h> //gnss driver structures
-#include <isxcamera.h>  //custom camera library utils
-
 #define GPS_DEV_NAME "/dev/gps"
 #define BARO_DEV_NAME "/dev/sensor/sensor_baro0"
 #define UV_DEV_NAME "/dev/sensor/sensor_uv0"

@@ -1,5 +1,7 @@
 #include <flight_fsm.h>
 #include <math.h>
+#include <arch/chip/gnss.h> //gnss driver structures
+#include <isxcamera.h>  //custom camera library utils
 
 int ret;
 int uv_fd, gyro_fd, baro_fd, camera_fd, gps_fd, radio_fd; // < file descriptors of sensors

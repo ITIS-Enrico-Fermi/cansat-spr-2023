@@ -44,395 +44,172 @@
  * Public Functions
  ****************************************************************************/
 
-#if 0
-void rfm95_reset(void);
-void rfm95_explicit_header_mode(void);
-void rfm95_implicit_header_mode(int size);
-void rfm95_idle(void);
-void rfm95_sleep(void); 
-void rfm95_receive(void);
-void rfm95_set_tx_power(int level);
-void rfm95_set_frequency(long frequency);
-void rfm95_set_spreading_factor(int sf);
-void rfm95_set_bandwidth(long sbw);
-void rfm95_set_coding_rate(int denominator);
-void rfm95_set_preamble_length(long length);
-void rfm95_set_sync_word(int sw);
-void rfm95_enable_crc(void);
-void rfm95_disable_crc(void);
-int rfm95_init(const char *dev_path);
-void rfm95_send_packet(const uint8_t *buf, int size);
-int rfm95_receive_packet(uint8_t *buf, int size);
-int rfm95_received(void);
-int rfm95_packet_rssi(void);
-float rfm95_packet_snr(void);
-void rfm95_close(void);
-int rfm95_initialized(void);
-void rfm95_dump_registers(void);
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <nuttx/sensors/ioctl.h>
+#include <poll.h>
+#include <nuttx/config.h>
+#include <debug.h>
+#include <arch/chip/gnss.h> //gnss driver structures
 
-static int __implicit;
-static long __frequency;
-
-static int radio_fd; // < file descriptor of /dev/radio0, opened in rfm95_init()
-
-/**
- * Write a value to a register.
- * @param reg Register index.
- * @param val Value to write.
- */
-void rfm95_write_reg(int reg, int val) {
-   uint8_t out[2] = { 0x80 | reg, val };
-   uint8_t in[2];
-
-   write(radio_fd, out, 2);
-   read(radio_fd, in, 2);
-}
-
-/**
- * Read the current value of a register.
- * @param reg Register index.
- * @return Value of the register.
- */
-int rfm95_read_reg(int reg) {
-   uint8_t out[2] = { reg, 0xff };
-   uint8_t in[2];
-
-   write(radio_fd, out, 2);
-   read(radio_fd, in, 2);
-   return in[1];
-}
-
-void rfm95_reset() {
-   ioctl(radio_fd, RFM95_IOCTL_RESET);
-}
-
-/**
- * Configure explicit header mode.
- * Packet size will be included in the frame.
- */
-void rfm95_explicit_header_mode(void) {
-   __implicit = 0;
-   rfm95_write_reg(REG_MODEM_CONFIG_1, rfm95_read_reg(REG_MODEM_CONFIG_1) & 0xfe);
-}
-
-/**
- * Configure implicit header mode.
- * All packets will have a predefined size.
- * @param size Size of the packets.
- */
-void rfm95_implicit_header_mode(int size) {
-   __implicit = 1;
-   rfm95_write_reg(REG_MODEM_CONFIG_1, rfm95_read_reg(REG_MODEM_CONFIG_1) | 0x01);
-   rfm95_write_reg(REG_PAYLOAD_LENGTH, size);
-}
-
-/**
- * Sets the radio transceiver in idle mode.
- * Must be used to change registers and access the FIFO.
- */
-void rfm95_idle(void) {
-   rfm95_write_reg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_STDBY);
-}
-
-/**
- * Sets the radio transceiver in sleep mode.
- * Low power consumption and FIFO is lost.
- */
-void rfm95_sleep(void) { 
-   rfm95_write_reg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_SLEEP);
-}
-
-/**
- * Sets the radio transceiver in receive mode.
- * Incoming packets will be received.
- */
-void rfm95_receive(void) {
-   rfm95_write_reg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_RX_CONTINUOUS);
-}
-
-/**
- * Configure power level for transmission
- * @param level 2-17, from least to most power
- */
-void rfm95_set_tx_power(int level) {
-   // RF9x module uses PA_BOOST pin
-   if (level < 2) level = 2;
-   else if (level > 17) level = 17;
-   rfm95_write_reg(REG_PA_CONFIG, PA_BOOST | (level - 2));
-}
-
-/**
- * Set carrier frequency.
- * @param frequency Frequency in Hz
- */
-void rfm95_set_frequency(long frequency) {
-   __frequency = frequency;
-
-   uint64_t frf = ((uint64_t)frequency << 19) / 32000000;
-
-   rfm95_write_reg(REG_FRF_MSB, (uint8_t)(frf >> 16));
-   rfm95_write_reg(REG_FRF_MID, (uint8_t)(frf >> 8));
-   rfm95_write_reg(REG_FRF_LSB, (uint8_t)(frf >> 0));
-}
-
-/**
- * Set spreading factor.
- * @param sf 6-12, Spreading factor to use.
- */
-void rfm95_set_spreading_factor(int sf) {
-   if (sf < 6) sf = 6;
-   else if (sf > 12) sf = 12;
-
-   if (sf == 6) {
-      rfm95_write_reg(REG_DETECTION_OPTIMIZE, 0xc5);
-      rfm95_write_reg(REG_DETECTION_THRESHOLD, 0x0c);
-   } else {
-      rfm95_write_reg(REG_DETECTION_OPTIMIZE, 0xc3);
-      rfm95_write_reg(REG_DETECTION_THRESHOLD, 0x0a);
-   }
-
-   rfm95_write_reg(REG_MODEM_CONFIG_2, (rfm95_read_reg(REG_MODEM_CONFIG_2) & 0x0f) | ((sf << 4) & 0xf0));
-}
-
-/**
- * Set bandwidth (bit rate)
- * @param sbw Bandwidth in Hz (up to 500000)
- */
-void rfm95_set_bandwidth(long sbw) {
-   int bw;
-
-   if (sbw <= 7.8E3) bw = 0;
-   else if (sbw <= 10.4E3) bw = 1;
-   else if (sbw <= 15.6E3) bw = 2;
-   else if (sbw <= 20.8E3) bw = 3;
-   else if (sbw <= 31.25E3) bw = 4;
-   else if (sbw <= 41.7E3) bw = 5;
-   else if (sbw <= 62.5E3) bw = 6;
-   else if (sbw <= 125E3) bw = 7;
-   else if (sbw <= 250E3) bw = 8;
-   else bw = 9;
-   rfm95_write_reg(REG_MODEM_CONFIG_1, (rfm95_read_reg(REG_MODEM_CONFIG_1) & 0x0f) | (bw << 4));
-}
-
-/**
- * Set coding rate 
- * @param denominator 5-8, Denominator for the coding rate 4/x
- */ 
-void rfm95_set_coding_rate(int denominator) {
-   if (denominator < 5) denominator = 5;
-   else if (denominator > 8) denominator = 8;
-
-   int cr = denominator - 4;
-   rfm95_write_reg(REG_MODEM_CONFIG_1, (rfm95_read_reg(REG_MODEM_CONFIG_1) & 0xf1) | (cr << 1));
-}
-
-/**
- * Set the size of preamble.
- * @param length Preamble length in symbols.
- */
-void rfm95_set_preamble_length(long length) {
-   rfm95_write_reg(REG_PREAMBLE_MSB, (uint8_t)(length >> 8));
-   rfm95_write_reg(REG_PREAMBLE_LSB, (uint8_t)(length >> 0));
-}
-
-/**
- * Change radio sync word.
- * @param sw New sync word to use.
- */
-void rfm95_set_sync_word(int sw) {
-   rfm95_write_reg(REG_SYNC_WORD, sw);
-}
-
-/**
- * Enable appending/verifying packet CRC.
- */
-void rfm95_enable_crc(void) {
-   rfm95_write_reg(REG_MODEM_CONFIG_2, rfm95_read_reg(REG_MODEM_CONFIG_2) | 0x04);
-}
-
-/**
- * Disable appending/verifying packet CRC.
- */
-void rfm95_disable_crc(void) {
-   rfm95_write_reg(REG_MODEM_CONFIG_2, rfm95_read_reg(REG_MODEM_CONFIG_2) & 0xfb);
-}
-
-/**
- * Perform hardware initialization.
- */
-int rfm95_init(const char *dev_path) {
-   radio_fd = open(dev_path, O_RDWR);
-   assert(radio_fd > 0);
-
-   /*
-    * Perform hardware reset.
-    */
-   rfm95_reset();
-
-   /*
-    * Check version.
-    */
-   uint8_t version;
-   uint8_t i = 0;
-   while(i++ < TIMEOUT_RESET) {
-      version = rfm95_read_reg(REG_VERSION);
-      if(version == 0x12) break;
-      up_mdelay(2);
-   }
-   DEBUGASSERT(i < TIMEOUT_RESET + 1); // at the end of the loop above, the max value i can reach is TIMEOUT_RESET + 1
-   printf("Reset: %d\n", i);
-   printf("Version: %d\n", version);
-
-   /*
-    * Default configuration.
-    */
-   rfm95_sleep();
-   rfm95_write_reg(REG_FIFO_RX_BASE_ADDR, 0);
-   rfm95_write_reg(REG_FIFO_TX_BASE_ADDR, 0);
-   rfm95_write_reg(REG_LNA, rfm95_read_reg(REG_LNA) | 0x03);
-   rfm95_write_reg(REG_MODEM_CONFIG_3, 0x04);
-   rfm95_set_tx_power(17);
-
-   rfm95_idle();
-   return 1;
-}
-
-/**
- * Send a packet.
- * @param buf Data to be sent
- * @param size Size of data.
- */
-void rfm95_send_packet(const uint8_t *buf, int size) {
-   /*
-    * Transfer data to radio.
-    */
-   rfm95_idle();
-   rfm95_write_reg(REG_FIFO_ADDR_PTR, 0);
-
-   for(int i=0; i<size; i++) 
-      rfm95_write_reg(REG_FIFO, *buf++);
-   
-   rfm95_write_reg(REG_PAYLOAD_LENGTH, size);
-   
-   /*
-    * Start transmission and wait for conclusion.
-    */
-   rfm95_write_reg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
-   while((rfm95_read_reg(REG_IRQ_FLAGS) & IRQ_TX_DONE_MASK) == 0)
-   {
-      up_mdelay(100);
-   }
-   
-
-   rfm95_write_reg(REG_IRQ_FLAGS, IRQ_TX_DONE_MASK);
-}
-
-/**
- * Read a received packet.
- * @param buf Buffer for the data.
- * @param size Available size in buffer (bytes).
- * @return Number of bytes received (zero if no packet available).
- */
-int rfm95_receive_packet(uint8_t *buf, int size) {
-   int len = 0;
-
-   /*
-    * Check interrupts.
-    */
-   int irq = rfm95_read_reg(REG_IRQ_FLAGS);
-   rfm95_write_reg(REG_IRQ_FLAGS, irq);
-   if((irq & IRQ_RX_DONE_MASK) == 0) return 0;
-   if(irq & IRQ_PAYLOAD_CRC_ERROR_MASK) return 0;
-
-   /*
-    * Find packet size.
-    */
-   if (__implicit) len = rfm95_read_reg(REG_PAYLOAD_LENGTH);
-   else len = rfm95_read_reg(REG_RX_NB_BYTES);
-
-   /*
-    * Transfer data from radio.
-    */
-   rfm95_idle();   
-   rfm95_write_reg(REG_FIFO_ADDR_PTR, rfm95_read_reg(REG_FIFO_RX_CURRENT_ADDR));
-   if(len > size) len = size;
-   for(int i=0; i<len; i++) 
-      *buf++ = rfm95_read_reg(REG_FIFO);
-
-   return len;
-}
-
-/**
- * Returns non-zero if there is data to read (packet received).
- */
-int rfm95_received(void) {
-   if(rfm95_read_reg(REG_IRQ_FLAGS) & IRQ_RX_DONE_MASK) return 1;
-   return 0;
-}
-
-/**
- * Return last packet's RSSI.
- */
-int rfm95_packet_rssi(void) {
-   return (rfm95_read_reg(REG_PKT_RSSI_VALUE) - (__frequency < 868E6 ? 164 : 157));
-}
-
-/**
- * Return last packet's SNR (signal to noise ratio).
- */
-float rfm95_packet_snr(void) {
-   return ((int8_t)rfm95_read_reg(REG_PKT_SNR_VALUE)) * 0.25;
-}
-
-/**
- * Shutdown hardware.
- */
-void rfm95_close(void) {
-   rfm95_sleep();
-   close(radio_fd);
-}
-#endif
+#define GNSS_POLL_FD_NUM 1
+#define GNSS_POLL_TIMEOUT_FOREVER -1
+#define GNSS_USERSPACE_SIG 18
+#define GPS_DEV_NAME "/dev/gps"
 
 /****************************************************************************
  * main
  ****************************************************************************/
+/* GPS data */
+static uint32_t posfixflag;
+static struct cxd56_gnss_positiondata_s posdat;
+int posperiod;
+sigset_t mask;
+const struct timespec waitgps = {
+    .tv_sec = 3,
+    .tv_nsec = 0};
 
+
+struct __attribute__((__packed__)) cxd56_gnss_latlon_s
+{
+  float latitude;
+  float longitude;
+};
+typedef struct cxd56_gnss_latlon_s gnss_t;
 /*
  * Test SPI driver before writing a stable library
  * library will offer a fast and easy way to use rfm95 device.
  */
+void parse_gps(FAR void *in, FAR void *out)
+{
+  struct cxd56_gnss_positiondata_s *posdat = (struct cxd56_gnss_positiondata_s *)in;
+  gnss_t *postransform = (gnss_t *)out;
+  if (posdat->receiver.pos_fixmode != CXD56_GNSS_PVT_POSFIX_INVALID)
+  {
+    postransform->latitude = (float)posdat->receiver.latitude;
+    postransform->longitude = (float)posdat->receiver.longitude;
+  }
+  else
+  {
+    /* No measurement. */
+    postransform->latitude = 0.0F;
+    postransform->longitude = 0.0F;
+    _err(">No Positioning Data\n");
+  }
+}
+
 int main(int argc, FAR char *argv[])
 {
-  int ret;
-  printf("RFM95 driver test app\n");
+   int ret, gps_fd;
+   gnss_t *gps;
+   printf("RFM95 driver test app\n");
 
-  int fd = open(DEV_NAME, O_RDWR);
-  if (fd < 0)
-    {
+   gps_fd = open(GPS_DEV_NAME, O_RDONLY);
+   if (gps_fd < 0)
+   {
+      syslog(LOG_ERR, "Can't open GNSS character device at %s. Error code: %d\n", GPS_DEV_NAME, errno);
+      return ERROR;
+   }
+   /* START SETUP GPS0 IOCTL */
+   /* Prepare a signal set and enable GNSS signal only. */
+   sigemptyset(&mask);
+   sigaddset(&mask, GNSS_USERSPACE_SIG);
+   ret = sigprocmask(SIG_BLOCK, &mask, NULL);
+   if (ret != OK)
+   {
+      _info("sigprocmask failed. %d\n", ret);
+   }
+
+   /* Set the signal to notify GNSS events. */
+   struct cxd56_gnss_signal_setting_s setting = {
+       .fd = gps_fd,
+       .enable = true,
+       .gnsssig = CXD56_GNSS_SIG_GNSS,
+       .signo = GNSS_USERSPACE_SIG,
+       .data = NULL};
+
+   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SIGNAL_SET, &setting);
+   if (ret < 0)
+   {
+      _info("Error while configuring signalling\n");
+      return -1;
+   }
+
+   /* START set GNSS parameters. */
+   uint32_t set_satellite;
+
+   /*
+    * Set the operation mode (always 1) and the notify cycle, which is the
+    * frequency of a new position from the chip.
+    */
+   struct cxd56_gnss_ope_mode_param_s operation_mode_config = {
+       .mode = 1,
+       .cycle = 1000 // in milliseconds
+   };
+
+   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SET_OPE_MODE, &operation_mode_config);
+   if (ret < 0)
+   {
+      _info("Error setting Operation Mode via ioctl. Return code: %d\n", ret);
+      return ret;
+   }
+
+   /* Set the type of satellite system used by GNSS. */
+   set_satellite = CXD56_GNSS_SAT_GPS | CXD56_GNSS_SAT_GLONASS;
+
+   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_SELECT_SATELLITE_SYSTEM, set_satellite);
+   if (ret < 0)
+   {
+      _info("Can't set satellite system.\n");
+      return ret;
+   }
+   /* END set GNSS parameters. */
+
+   int fd = open(DEV_NAME, O_RDWR);
+   if (fd < 0)
+   {
       int errcode = errno;
       printf("ERROR: Failed to open device %s: %d\n", DEV_NAME, errcode);
-    }
+   }
 
-  ret = ioctl(fd, RFM95_IOCTL_INIT, 0);
-  if (ret < 0)
-    {
-      printf("failed to change init: %d!\n", ret);
-    }
-
-  printf("Init done!\n");
-
-  char msg[5] = {"\xf5Ciao!"};
-  for(int i=0;i<5;i++)
-  {
-   ret = write(fd, msg, sizeof(msg));
+   ret = ioctl(fd, RFM95_IOCTL_INIT, 0);
    if (ret < 0)
-      {
-         printf("failed to send message: %d!\n", ret);
-      }
-   else printf("Message sent!\n");
-   up_mdelay(1000);
-  }
+   {
+      printf("failed to change init: %d!\n", ret);
+   }
 
-  close(fd);
-  return 0;
+   printf("Init done!\n");
+   while (1)
+   {
+      _info("waiting gps signal..\n");
+      ret = sigtimedwait(&mask, NULL, &waitgps);
+      // ret = sigwaitinfo(&mask, NULL);
+      if (ret != GNSS_USERSPACE_SIG)
+      {
+         _info("Waited signal, but instead of GNSS signal got: %d\n", ret);
+      }
+      else
+         _info("GPS signal received!\n");
+
+      /* Read and print POS data. */
+      ret = read(gps_fd, &posdat, sizeof(posdat));
+      if (ret < 0)
+      {
+         _info("Can't read gps0\n");
+         return ERROR;
+      }
+      parse_gps(&posdat, gps);
+      write(fd, gps, sizeof(gnss_t));
+      up_mdelay(5000);
+   }
+
+   close(fd);
+   return 0;
 }

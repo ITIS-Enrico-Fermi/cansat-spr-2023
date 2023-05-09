@@ -1,4 +1,6 @@
 #include <flight_senutils.h>
+#include <arch/chip/gnss.h> //gnss driver structures
+#include <isxcamera.h>  //custom camera library utils
 
 void parse_gps(FAR void *in, FAR void *out)
 {
