@@ -1,0 +1,25 @@
+
+config CANSAT_APPS_CAMERA_NN
+	tristate "Camera neural network test with TensorFlow"
+	default y
+	---help---
+		Enable the camera_nn app
+
+if CANSAT_APPS_CAMERA_NN
+
+config CANSAT_APPS_CAMERA_NN_PROGNAME
+	string "Program name"
+	default "camera_nn"
+	---help---
+		This is the name of the program that will be use when the NSH ELF
+		program is installed.
+
+config CANSAT_APPS_CAMERA_NN_PRIORITY
+	int "camera_nn task priority"
+	default 100
+
+config CANSAT_APPS_CAMERA_NN_STACKSIZE
+	int "camera_nn stack size"
+	default 2048
+
+endif
