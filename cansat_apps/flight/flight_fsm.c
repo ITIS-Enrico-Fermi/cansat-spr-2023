@@ -4,8 +4,10 @@
 #include <isxcamera.h>  //custom camera library utils
 
 /* TODO check every error condition consequence */
+/* TODO change sleep method to millis interval */
 
 #define ALTITUDE_STABILIZE 5
+#define MAX_PHOTO 7
 
 int ret;
 int uv_fd, gyro_fd, baro_fd, camera_fd, gps_fd, radio_fd; // < file descriptors of sensors
@@ -38,41 +40,42 @@ float pressureToAltitude(float pres);
 // Funzioni di stato
 int boot_state(void)
 {
+  bool errorBoot = false;
   radio_fd = open(RADIO_DEV_NAME, O_WRONLY);
   if (radio_fd < 0)
   {
     syslog(LOG_ERR, "Can't open file descriptor for radio module");
-    return ERROR;
+    errorBoot = true;
   }
   camera_fd = open(CAMERA_DEV_NAME, 0);
   if (camera_fd < 0)
   {
     syslog(LOG_ERR, "Can't open file descriptor for camera module");
-    return ERROR;
+    errorBoot = true;
   }
   gps_fd = open(GPS_DEV_NAME, O_RDONLY);
   if (gps_fd < 0)
   {
     syslog(LOG_ERR, "Can't open GNSS character device at %s. Error code: %d\n", GPS_DEV_NAME, errno);
-    return ERROR;
+    errorBoot = true;
   }
   uv_fd = open(UV_DEV_NAME, O_RDONLY);
   if (uv_fd < 0)
   {
     syslog(LOG_ERR, "Can't open file descriptor for light sensor");
-    return -1;
+    errorBoot = true;
   }
   gyro_fd = open(GYRO_DEV_NAME, O_RDONLY);
   if (gyro_fd < 0)
   {
     syslog(LOG_ERR, "Can't open file descriptor for gyro sensor");
-    return -1;
+    errorBoot = true;
   }
   baro_fd = open(BARO_DEV_NAME, O_RDONLY | O_NONBLOCK);
   if (baro_fd < 0)
   {
     syslog(LOG_ERR, "Can't open file descriptor for baro sensor");
-    return -1;
+    errorBoot = true;
   }
 
   /* START SETUP BARO0 IOCTL */
@@ -87,7 +90,7 @@ int boot_state(void)
       _info("Failed to set interval for sensor:%s, ret:%s\n",
             "bmp280", strerror(errno));
     }
-    return ERROR;
+    errorBoot = true;
   }
   ret = ioctl(baro_fd, SNIOC_BATCH, latency);
   if (ret < 0)
@@ -98,7 +101,7 @@ int boot_state(void)
       _info("Failed to batch for sensor:%s, ret:%s\n",
             "bmp280", strerror(errno));
     }
-    return ERROR;
+    errorBoot = true;
   }
   fds.fd = baro_fd;
   fds.events = POLLIN;
@@ -110,7 +113,7 @@ int boot_state(void)
   {
 
     _info("Failed to reset radio0\n");
-    return ERROR;
+    errorBoot = true;
   }
   /* END SETUP RADIO0 IOCTL */
 
@@ -122,6 +125,7 @@ int boot_state(void)
   if (ret != OK)
   {
     _info("sigprocmask failed. %d\n", ret);
+    errorBoot = true;
   }
 
   /* Set the signal to notify GNSS events. */
@@ -136,7 +140,7 @@ int boot_state(void)
   if (ret < 0)
   {
     _info("Error while configuring signalling\n");
-    return -1;
+    errorBoot = true;
   }
 
   /* START set GNSS parameters. */
@@ -155,7 +159,7 @@ int boot_state(void)
   if (ret < 0)
   {
     _info("Error setting Operation Mode via ioctl. Return code: %d\n", ret);
-    return ret;
+    errorBoot = true;
   }
 
   /* Set the type of satellite system used by GNSS. */
@@ -165,7 +169,7 @@ int boot_state(void)
   if (ret < 0)
   {
     _info("Can't set satellite system.\n");
-    return ret;
+    errorBoot = true;
   }
   /* END set GNSS parameters. */
 
@@ -178,25 +182,22 @@ int boot_state(void)
   /* Start GNSS. */
   ret = ioctl(gps_fd, CXD56_GNSS_IOCTL_START, CXD56_GNSS_STMOD_HOT);
   if (ret < 0)
+  {
     _info("Error while starting GNSS in Hot Mode. Error code: %d\n", errno);
+    errorBoot = true;
+  }
   else
     syslog(LOG_INFO, "GNSS subsystem started correctly.\n");
 
   /* END SETUP GPS0 IOCTL */
 
-  if (ret < 0)
+  if(errorBoot)
   {
+    /* TODO: reboot here */
+    _info("FATAL: ERROR OCCURED ON BOOT!!\n");
     return ERROR;
   }
-  else
-  {
-    _info("Switching state from BOOT to IDLE\n");
-    return IDLE;
-  }
-
-  _info("FATAL: ERROR OCCURED ON BOOT!!\n");
-  /* TODO: reboot here */
-  return ERROR;
+  return IDLE;
 }
 
 /* Idle state is focused on LOW POWER MODE and LAUNCH DETECTION */
@@ -263,6 +264,7 @@ int idle_state(void)
 /* COLLECT state is the crucial phase. Every measure is taken here */
 int collect_state(void)
 {
+  static int photoCount = MAX_PHOTO;
   /* Read baro data. */
   if (poll(&fds, 1, -1) > 0)
   {
@@ -310,13 +312,46 @@ int collect_state(void)
   }
   uint8_t *uv_ptr = (uint8_t *)&uv;
 
+  /* Take photo */
+  _info("Start capturing...\n");
+  ret = start_capture(camera_fd);
+  if (ret != OK)
+  {
+    printf("Can't start capture...\n");
+    return COLLECT;
+  }
+  else if (photoCount > 0)
+  {
+    ret = shoot_photo(camera_fd);
+    if (ret != OK)
+    {
+      printf("Can't shoot photo...\n");
+      return ERROR;
+    }
+    photoCount--;
+    printf("%d photo left.\n", photoCount);
+  }
+  ret = stop_capture(camera_fd);
+  if (ret != OK)
+  {
+    printf("Can't stop capture...\n");
+    return ERROR;
+  }
+  
+  /* Tensorflow function for imgclass result */
+  
   pkt.pressure = baro.pressure;
   pkt.gps = gps;
   pkt.gyro = gyro;
   pkt.uv = uv_ptr[0];
+  pkt.imgclass = 0;
   pkt.counter++;
 
   ret = write(radio_fd, &pkt, sizeof(struct lora_packet));
+  if (ret < 0)
+  {
+    snerr("Error while sending packet\n");
+  }
   _info("LoRa packet inside:\n");
   _info("pres: %f\n", pkt.pressure);
   _info("accelx %d; accely %d; accelz %d\n", pkt.gyro.accel.x, pkt.gyro.accel.y, pkt.gyro.accel.z);
@@ -327,8 +362,8 @@ int collect_state(void)
   _info("uv: %d\n", pkt.uv);
   _info("counter: %d\n", pkt.counter);
 
-  /* TODO COLLECT --> RECOVER condition */
-  if (false)
+  float now_altitude = pressureToAltitude(baro.pressure);
+  if (now_altitude - ground_altitude < 30 && now_altitude - ground_altitude > -30)
   {
     return RECOVER;
   }
@@ -336,11 +371,47 @@ int collect_state(void)
   return COLLECT;
 }
 
+/* Recover_state sends only GPS data */
 int recover_state(void)
 {
+  /* Wait GPS data. */
+  ret = sigtimedwait(&mask, NULL, &waitgps);
+  if (ret != GNSS_USERSPACE_SIG)
+  { 
+    gps.latitude = 102.0F; //error code
+    gps.longitude = 102.F; //error code
+    snerr("Waited signal, but instead of GNSS signal got: %d\n", ret);
+  }
+  else /* Read only if there's usefull data */
+  {
+  ret = read(gps_fd, &posdat, sizeof(posdat));
+  if (ret < 0)
+  {
+    snerr("Can't read gps0\n");
+  }
+  else
+  {
+    parse_gps(&posdat, &gps);
+  }
+  }
 
-  // ...comportamento di RECOVER...
+  pkt.pressure = 0;
+  pkt.uv = 0;
+  pkt.gyro.accel.x = 0;
+  pkt.gyro.accel.x = 0;
+  pkt.gyro.accel.x = 0;
+  pkt.gyro.temp = 0;
+  pkt.gyro.roto.x = 0;
+  pkt.gyro.roto.y = 0;
+  pkt.gyro.roto.z = 0;
+  pkt.imgclass = 10;
 
+  ret = write(radio_fd, &pkt, sizeof(struct lora_packet));
+  if (ret < 0)
+  {
+    snerr("Error while sending packet\n");
+  }
+  sleep(15);
   return RECOVER;
 }
 

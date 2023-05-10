@@ -20,7 +20,7 @@ int main(int argc, FAR char *argv[])
     if (current_state < 0)
     {
       printf("Fatal error during inside fsm\n");
-      return ERROR;
+      return 0;
     }
   }
 

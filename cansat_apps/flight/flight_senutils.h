@@ -106,5 +106,6 @@ struct __attribute__((__packed__)) lora_packet
   gyro_t gyro;
   gnss_t gps;
   uint8_t uv;
+  uint8_t imgclass;
   uint16_t counter; // < monotonic packet counter
 };
