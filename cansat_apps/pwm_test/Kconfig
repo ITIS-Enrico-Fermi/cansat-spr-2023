@@ -1,0 +1,41 @@
+
+config CANSAT_APPS_PWM_TEST
+	tristate "PWM test using device driver"
+	default y
+	---help---
+		Enable the pwm_test app
+
+if CANSAT_APPS_PWM_TEST
+
+config CANSAT_APPS_PWM_TEST_PROGNAME
+	string "Program name"
+	default "pwm_test"
+	---help---
+		This is the name of the program that will be use when the NSH ELF
+		program is installed.
+
+config CANSAT_APPS_PWM_TEST_PRIORITY
+	int "pwm_test task priority"
+	default 100
+
+config CANSAT_APPS_PWM_TEST_STACKSIZE
+	int "pwm_test stack size"
+	default 2048
+
+config CANSAT_APPS_PWM_TEST_DUTYCYCLE
+	int "PWM signal duty cycle in %"
+	default 50
+
+config CANSAT_APPS_PWM_TEST_FREQUENCY
+	int "PWM signal frequency in Hz"
+	default 100
+
+config CANSAT_APPS_PWM_TEST_DURATION
+	int "PWM signal duration in µs"
+	default 5e6
+
+config CANSAT_APPS_PWM_TEST_DEVPATH
+	string "PWM driver device path"
+	default "/dev/pwm0"
+
+endif
