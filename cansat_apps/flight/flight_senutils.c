@@ -57,32 +57,3 @@ void parse_gyro(void *in, void *out)
   printf("temp: %.2f\n", temperature);
   printf("x_gyro: %.2f  dps\ny_gyro: %.2f dps\nz_gyro: %.2f dps\n", gyroX, gyroY, gyroZ);
 }
-
-void double_to_dmf(double x, struct cxd56_gnss_dms_s *dmf)
-{
-  int b;
-  int d;
-  int m;
-  double f;
-  double t;
-
-  if (x < 0)
-  {
-    b = 1;
-    x = -x;
-  }
-  else
-  {
-    b = 0;
-  }
-
-  d = (int)x; /* = floor(x), x is always positive */
-  t = (x - d) * 60;
-  m = (int)t; /* = floor(t), t is always positive */
-  f = (t - m) * 10000;
-
-  dmf->sign = b;
-  dmf->degree = d;
-  dmf->minute = m;
-  dmf->frac = f;
-}

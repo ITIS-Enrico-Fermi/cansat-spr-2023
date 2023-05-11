@@ -19,3 +19,7 @@ typedef enum
   COLLECT,
   RECOVER
 } fsm_state;
+
+/* Utility functions */
+void parse_gyro(void *in, void *out);
+void parse_gps(void *in, void *out);

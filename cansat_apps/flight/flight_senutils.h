@@ -38,9 +38,6 @@
 /*** SENSOR UTILITY FUNCTIONS *********************/
 /**************************************************/
 
-void parse_gyro(void *in, void *out);
-void parse_gps(void *in, void *out);
-
 /**
  * This is the data structure to read from the accelerometer (MPU6050).
  *
@@ -78,15 +75,6 @@ struct __attribute__((__packed__)) baro_press_data /* Type: Barometer */
   float temperature;  /* Temperature in degrees celsius */
 };
 typedef struct baro_press_data baro_t;
-
-struct __attribute__((__packed__)) cxd56_gnss_dms_s
-{
-  int8_t   sign;
-  uint8_t  degree;
-  uint8_t  minute;
-  uint32_t frac;
-};
-void double_to_dmf(double x, struct cxd56_gnss_dms_s *dmf);
 
 struct __attribute__((__packed__)) cxd56_gnss_latlon_s
 {

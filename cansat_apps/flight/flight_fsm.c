@@ -59,12 +59,14 @@ int boot_state(void)
     syslog(LOG_ERR, "Can't open GNSS character device at %s. Error code: %d\n", GPS_DEV_NAME, errno);
     errorBoot = true;
   }
+#ifdef CONFIG_SENSORS_VEML6070
   uv_fd = open(UV_DEV_NAME, O_RDONLY);
   if (uv_fd < 0)
   {
     syslog(LOG_ERR, "Can't open file descriptor for light sensor");
     errorBoot = true;
   }
+#endif
   gyro_fd = open(GYRO_DEV_NAME, O_RDONLY);
   if (gyro_fd < 0)
   {
@@ -203,10 +205,9 @@ int boot_state(void)
 /* Idle state is focused on LOW POWER MODE and LAUNCH DETECTION */
 int idle_state(void)
 {
-  uint8_t calibrateCounter = ALTITUDE_STABILIZE;
+  static uint8_t calibrateCounter = ALTITUDE_STABILIZE;
   float new_altitude = 0;
   // read baro
-  _info("Reading baro..\n");
   if (poll(&fds, 1, -1) > 0)
   {
     if (read(baro_fd, &baro, len_baro) >= len_baro)
@@ -245,7 +246,7 @@ int idle_state(void)
     if(calibrateCounter == 0)
     {
       ground_altitude /= (float)ALTITUDE_STABILIZE;
-      _info("ground_altitude is %f", ground_altitude);
+      _info("ground_altitude is %f\n", ground_altitude);
     }
     sleep(2); 
     return IDLE;
@@ -304,6 +305,7 @@ int collect_state(void)
   }
 
   // ...comportamento di COLLECT...
+#ifdef CONFIG_SENSORS_VEML6070
   ret = read(uv_fd, &uv, len_uv);
   if (ret < 0)
   {
@@ -311,31 +313,36 @@ int collect_state(void)
     return ERROR;
   }
   uint8_t *uv_ptr = (uint8_t *)&uv;
+#else
+  //uv = 2560; /* Big endian */
+  uv = 10; /* Little endian */
+  uint8_t *uv_ptr = (uint8_t *)&uv; 
+#endif
 
+  if (photoCount > 0)
+  {
   /* Take photo */
-  _info("Start capturing...\n");
   ret = start_capture(camera_fd);
   if (ret != OK)
   {
-    printf("Can't start capture...\n");
-    return COLLECT;
+    snerr("Can't start capture...\n");
   }
   else if (photoCount > 0)
   {
     ret = shoot_photo(camera_fd);
     if (ret != OK)
     {
-      printf("Can't shoot photo...\n");
-      return ERROR;
+      snerr("Can't shoot photo...\n");
     }
     photoCount--;
-    printf("%d photo left.\n", photoCount);
+    sninfo("%d photo left.\n", photoCount);
   }
   ret = stop_capture(camera_fd);
   if (ret != OK)
   {
-    printf("Can't stop capture...\n");
-    return ERROR;
+    snerr("Can't stop capture...\n");
+  }
+  photoCount--;
   }
   
   /* Tensorflow function for imgclass result */
@@ -359,7 +366,7 @@ int collect_state(void)
   _info("rotox %d; rotoy %d; rotoz %d\n", pkt.gyro.roto.x, pkt.gyro.roto.y, pkt.gyro.roto.z);
   _info("lat: %f; lon: %f\n", pkt.gps.latitude, pkt.gps.longitude);
   _info("uv: %d\n", pkt.uv);
-  _info("uv: %d\n", pkt.uv);
+  _info("imgclass: %d\n", pkt.imgclass);
   _info("counter: %d\n", pkt.counter);
 
   float now_altitude = pressureToAltitude(baro.pressure);
