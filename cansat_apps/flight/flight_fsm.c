@@ -1,13 +1,15 @@
 #include <flight_fsm.h>
 #include <math.h>
 #include <arch/chip/gnss.h> //gnss driver structures
-#include <isxcamera.h>  //custom camera library utils
+#include <isxcamera.h>      //custom camera library utils
 
 /* TODO check every error condition consequence */
 /* TODO change sleep method to millis interval */
 
 #define ALTITUDE_STABILIZE 5
 #define MAX_PHOTO 7
+#define PHOTO_DELAY 10000
+#define MEASURE_DELAY 3000
 
 int ret;
 int uv_fd, gyro_fd, baro_fd, camera_fd, gps_fd, radio_fd; // < file descriptors of sensors
@@ -59,14 +61,12 @@ int boot_state(void)
     syslog(LOG_ERR, "Can't open GNSS character device at %s. Error code: %d\n", GPS_DEV_NAME, errno);
     errorBoot = true;
   }
-#ifdef CONFIG_SENSORS_VEML6070
   uv_fd = open(UV_DEV_NAME, O_RDONLY);
   if (uv_fd < 0)
   {
     syslog(LOG_ERR, "Can't open file descriptor for light sensor");
     errorBoot = true;
   }
-#endif
   gyro_fd = open(GYRO_DEV_NAME, O_RDONLY);
   if (gyro_fd < 0)
   {
@@ -193,7 +193,14 @@ int boot_state(void)
 
   /* END SETUP GPS0 IOCTL */
 
-  if(errorBoot)
+  /* Camera lib init */
+  ret = camlib_init(camera_fd);
+  if (ret < 0)
+  {
+    snerr("Can't init camlib!\n");
+  }
+
+  if (errorBoot)
   {
     /* TODO: reboot here */
     _info("FATAL: ERROR OCCURED ON BOOT!!\n");
@@ -220,16 +227,16 @@ int idle_state(void)
   }
   ret = sigtimedwait(&mask, NULL, &waitgps);
   if (ret != GNSS_USERSPACE_SIG)
-  { 
+  {
     snerr("Waited signal, but instead of GNSS signal got: %d\n", ret);
   }
   else /* We read gps from the beginning since it takes minutes to sync from boot */
   {
-  ret = read(gps_fd, &posdat, sizeof(posdat));
-  if (ret < 0)
-  {
-    snerr("Can't read gps0\n");
-  }
+    ret = read(gps_fd, &posdat, sizeof(posdat));
+    if (ret < 0)
+    {
+      snerr("Can't read gps0\n");
+    }
   }
 
   /* FSM IDLE --> COLLECT CONDITION:
@@ -239,120 +246,136 @@ int idle_state(void)
   _info("new_altitude = %f\n", new_altitude);
 
   /* Altitude calibration takes ALTITUDE_STABILIZE * 2 seconds */
-  if(calibrateCounter > 0)
+  if (calibrateCounter > 0)
   {
     ground_altitude += new_altitude;
     calibrateCounter--;
-    if(calibrateCounter == 0)
+    if (calibrateCounter == 0)
     {
       ground_altitude /= (float)ALTITUDE_STABILIZE;
       _info("ground_altitude is %f\n", ground_altitude);
     }
-    sleep(2); 
+    sleep(2);
     return IDLE;
   }
 
+  new_altitude += 479; /* TODO this is made for testing, REMOVE BEFORE LAUNCH! */
   /* When cansat gets at least 400m higher then ground */
-  if (new_altitude - 400 > ground_altitude)
+  if (new_altitude - 480 > ground_altitude)
   {
-    _info("Switching state from IDLE to COLLECT");
+    _info("Switching state from IDLE to COLLECT\n");
     return COLLECT;
   }
   sleep(5);
   return IDLE;
 }
 
-/* COLLECT state is the crucial phase. Every measure is taken here */
+/* COLLECT state is the crucial phase. Every measure is taken here
+ * each packet is sent 3 times to help the recever to get the message
+ */
 int collect_state(void)
 {
   static int photoCount = MAX_PHOTO;
-  /* Read baro data. */
-  if (poll(&fds, 1, -1) > 0)
+  static unsigned long lastPhoto = 0;
+  static unsigned long lastMeasure = 0;
+
+  /* Get clocktime ms */
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  unsigned long millis = now.tv_sec * 1000 + now.tv_nsec / 1000000;
+
+  if (millis - lastMeasure > MEASURE_DELAY)
   {
-    if (read(baro_fd, &baro, len_baro) >= len_baro)
+    lastMeasure = millis;
+    /* Read baro data. */
+    if (poll(&fds, 1, -1) > 0)
     {
+      if (read(baro_fd, &baro, len_baro) >= len_baro)
+      {
+      }
+      else
+      {
+        snerr("Can't read baro0\n");
+      }
     }
-    else
+    /* Read gyro data. */
+    ret = read(gyro_fd, &gyro, len_gyro);
+    if (ret < 0)
     {
-      snerr("Can't read baro0\n");
+      snerr("Can't read gyro0\n");
     }
-  }
-  /* Read gyro data. */
-  ret = read(gyro_fd, &gyro, len_gyro);
-  if (ret < 0)
-  {
-    snerr("Can't read gyro0\n");
-  }
-  /* Wait GPS data. */
-  ret = sigtimedwait(&mask, NULL, &waitgps);
-  if (ret != GNSS_USERSPACE_SIG)
-  { 
-    gps.latitude = 102.0F; //error code
-    gps.longitude = 102.F; //error code
-    snerr("Waited signal, but instead of GNSS signal got: %d\n", ret);
-  }
-  else /* Read only if there's usefull data */
-  {
-  ret = read(gps_fd, &posdat, sizeof(posdat));
-  if (ret < 0)
-  {
-    snerr("Can't read gps0\n");
-  }
-  else
-  {
-    parse_gps(&posdat, &gps);
-  }
+    /* Wait GPS data. */
+    ret = sigtimedwait(&mask, NULL, &waitgps);
+    if (ret != GNSS_USERSPACE_SIG)
+    {
+      gps.latitude = 102.0F; // error code
+      gps.longitude = 102.F; // error code
+      snerr("Waited signal, but instead of GNSS signal got: %d\n", ret);
+    }
+    else /* Read only if there's usefull data */
+    {
+      ret = read(gps_fd, &posdat, sizeof(posdat));
+      if (ret < 0)
+      {
+        snerr("Can't read gps0\n");
+      }
+      else
+      {
+        parse_gps(&posdat, &gps);
+      }
+    }
+
+    ret = read(uv_fd, &uv, len_uv);
+    if (ret < 0)
+    {
+      _info("Can't read uv0\n");
+      return ERROR;
+    }
+    uint8_t *uv_ptr = (uint8_t *)&uv;
+
+    /* Prepare packet after measure */
+    pkt.pressure = baro.pressure;
+    pkt.gps = gps;
+    pkt.gyro = gyro;
+    pkt.uv = uv_ptr[0];
+    pkt.imgclass = 0;
+    pkt.counter++;
   }
 
-  // ...comportamento di COLLECT...
-#ifdef CONFIG_SENSORS_VEML6070
-  ret = read(uv_fd, &uv, len_uv);
-  if (ret < 0)
+  if (millis - lastPhoto > PHOTO_DELAY)
   {
-    _info("Can't read uv0\n");
-    return ERROR;
-  }
-  uint8_t *uv_ptr = (uint8_t *)&uv;
-#else
-  //uv = 2560; /* Big endian */
-  uv = 10; /* Little endian */
-  uint8_t *uv_ptr = (uint8_t *)&uv; 
-#endif
-
-  if (photoCount > 0)
-  {
-  /* Take photo */
-  ret = start_capture(camera_fd);
-  if (ret != OK)
-  {
-    snerr("Can't start capture...\n");
-  }
-  else if (photoCount > 0)
-  {
-    ret = shoot_photo(camera_fd);
-    if (ret != OK)
+    lastPhoto = millis;
+    /* Not the cleanest code here.. */
+    if (photoCount > 0)
     {
-      snerr("Can't shoot photo...\n");
+      /* Take photo */
+      ret = start_capture(camera_fd);
+      if (ret != OK)
+      {
+        snerr("Can't start capture...\n");
+      }
+      else
+      {
+        ret = shoot_photo(camera_fd);
+        if (ret != OK)
+        {
+          snerr("Can't shoot photo...\n");
+        }
+        else
+        {
+          photoCount--;
+          _info("%d photo left.\n", photoCount);
+        }
+        ret = stop_capture(camera_fd);
+        if (ret != OK)
+        {
+          snerr("Can't stop capture...\n");
+        }
+      }
     }
-    photoCount--;
-    sninfo("%d photo left.\n", photoCount);
   }
-  ret = stop_capture(camera_fd);
-  if (ret != OK)
-  {
-    snerr("Can't stop capture...\n");
-  }
-  photoCount--;
-  }
-  
+
   /* Tensorflow function for imgclass result */
-  
-  pkt.pressure = baro.pressure;
-  pkt.gps = gps;
-  pkt.gyro = gyro;
-  pkt.uv = uv_ptr[0];
-  pkt.imgclass = 0;
-  pkt.counter++;
 
   ret = write(radio_fd, &pkt, sizeof(struct lora_packet));
   if (ret < 0)
@@ -370,11 +393,15 @@ int collect_state(void)
   _info("counter: %d\n", pkt.counter);
 
   float now_altitude = pressureToAltitude(baro.pressure);
-  if (now_altitude - ground_altitude < 30 && now_altitude - ground_altitude > -30)
+  if (photoCount > 0)
+  {
+    now_altitude += 50; /* TODO this is for testing ONLY, REMOVE BEFORE LAUNCH*/
+  }
+  if (now_altitude - ground_altitude < 20)
   {
     return RECOVER;
   }
-  sleep(5);
+  sleep(1);
   return COLLECT;
 }
 
@@ -384,22 +411,22 @@ int recover_state(void)
   /* Wait GPS data. */
   ret = sigtimedwait(&mask, NULL, &waitgps);
   if (ret != GNSS_USERSPACE_SIG)
-  { 
-    gps.latitude = 102.0F; //error code
-    gps.longitude = 102.F; //error code
+  {
+    gps.latitude = 102.0F; // error code
+    gps.longitude = 102.F; // error code
     snerr("Waited signal, but instead of GNSS signal got: %d\n", ret);
   }
   else /* Read only if there's usefull data */
   {
-  ret = read(gps_fd, &posdat, sizeof(posdat));
-  if (ret < 0)
-  {
-    snerr("Can't read gps0\n");
-  }
-  else
-  {
-    parse_gps(&posdat, &gps);
-  }
+    ret = read(gps_fd, &posdat, sizeof(posdat));
+    if (ret < 0)
+    {
+      snerr("Can't read gps0\n");
+    }
+    else
+    {
+      parse_gps(&posdat, &gps);
+    }
   }
 
   pkt.pressure = 0;
@@ -411,8 +438,20 @@ int recover_state(void)
   pkt.gyro.roto.x = 0;
   pkt.gyro.roto.y = 0;
   pkt.gyro.roto.z = 0;
+  pkt.gps = gps;
   pkt.imgclass = 10;
 
+  _info("LoRa packet inside:\n");
+  _info("pres: %f\n", pkt.pressure);
+  _info("accelx %d; accely %d; accelz %d\n", pkt.gyro.accel.x, pkt.gyro.accel.y, pkt.gyro.accel.z);
+  _info("temp %d\n", pkt.gyro.temp);
+  _info("rotox %d; rotoy %d; rotoz %d\n", pkt.gyro.roto.x, pkt.gyro.roto.y, pkt.gyro.roto.z);
+  _info("lat: %f; lon: %f\n", pkt.gps.latitude, pkt.gps.longitude);
+  _info("uv: %d\n", pkt.uv);
+  _info("imgclass: %d\n", pkt.imgclass);
+  _info("counter: %d\n", pkt.counter);
+
+  printf("Recover packet sent.\n");
   ret = write(radio_fd, &pkt, sizeof(struct lora_packet));
   if (ret < 0)
   {

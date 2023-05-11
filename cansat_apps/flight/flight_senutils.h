@@ -13,6 +13,7 @@
 #include <poll.h>
 #include <nuttx/config.h>
 #include <debug.h>
+#include <time.h>
 
 #define GPS_DEV_NAME "/dev/gps"
 #define BARO_DEV_NAME "/dev/sensor/sensor_baro0"
