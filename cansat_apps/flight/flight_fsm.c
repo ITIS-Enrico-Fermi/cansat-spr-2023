@@ -7,9 +7,10 @@
 /* TODO change sleep method to millis interval */
 
 #define ALTITUDE_STABILIZE 5
-#define MAX_PHOTO 7
+#define MAX_PHOTO 15
 #define PHOTO_DELAY 10000
 #define MEASURE_DELAY 3000
+#define DEPLOY_HEIGHT 400
 
 int ret;
 int uv_fd, gyro_fd, baro_fd, camera_fd, gps_fd, radio_fd; // < file descriptors of sensors
@@ -261,7 +262,7 @@ int idle_state(void)
 
   //new_altitude += 479; /* TODO this is made for testing, REMOVE BEFORE LAUNCH! */
   /* When cansat gets at least 400m higher then ground */
-  if (new_altitude - 450 > ground_altitude)
+  if (new_altitude - DEPLOY_HEIGHT > ground_altitude)
   {
     _info("Switching state from IDLE to COLLECT\n");
     return COLLECT;
