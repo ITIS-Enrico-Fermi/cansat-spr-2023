@@ -259,9 +259,9 @@ int idle_state(void)
     return IDLE;
   }
 
-  new_altitude += 479; /* TODO this is made for testing, REMOVE BEFORE LAUNCH! */
+  //new_altitude += 479; /* TODO this is made for testing, REMOVE BEFORE LAUNCH! */
   /* When cansat gets at least 400m higher then ground */
-  if (new_altitude - 480 > ground_altitude)
+  if (new_altitude - 450 > ground_altitude)
   {
     _info("Switching state from IDLE to COLLECT\n");
     return COLLECT;
@@ -329,7 +329,6 @@ int collect_state(void)
     if (ret < 0)
     {
       _info("Can't read uv0\n");
-      return ERROR;
     }
     uint8_t *uv_ptr = (uint8_t *)&uv;
 
@@ -338,8 +337,12 @@ int collect_state(void)
     pkt.gps = gps;
     pkt.gyro = gyro;
     pkt.uv = uv_ptr[0];
-    pkt.imgclass = 0;
+    pkt.imgclass = 2;
     pkt.counter++;
+    if(pkt.counter %5 == 0)
+    {
+      pkt.imgclass = 6;
+    }
   }
 
   if (millis - lastPhoto > PHOTO_DELAY)
@@ -393,11 +396,7 @@ int collect_state(void)
   _info("counter: %d\n", pkt.counter);
 
   float now_altitude = pressureToAltitude(baro.pressure);
-  if (photoCount > 0)
-  {
-    now_altitude += 50; /* TODO this is for testing ONLY, REMOVE BEFORE LAUNCH*/
-  }
-  if (now_altitude - ground_altitude < 20)
+  if (now_altitude - ground_altitude < 30)
   {
     return RECOVER;
   }
@@ -440,6 +439,7 @@ int recover_state(void)
   pkt.gyro.roto.z = 0;
   pkt.gps = gps;
   pkt.imgclass = 10;
+  pkt.counter++;
 
   _info("LoRa packet inside:\n");
   _info("pres: %f\n", pkt.pressure);
