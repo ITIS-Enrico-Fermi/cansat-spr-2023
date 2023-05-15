@@ -3,6 +3,19 @@
 This project is made by ITIS Enrico Fermi students. Commits are released to prepare the final result for the Cansat Europe Competition 2023 edition.
 The sony spresense overcomes every difficulty that stands in the way of it. Powered ARM® Cortex®-M4F x 6 cores (yes, thats a lot for IoT). That's why we chose Nuttx to support that deployment.
 
+# Guide
+
+In the hass-team folder, you can find the "user-space" applications that have been written by the HASS team. These applications work similarly to the ones you might write with an Arduino.
+
+The operating system used in this project is NUTTX, which is a real-time operating system (RTOS) that provides a rich set of features for embedded systems. NUTTX is POSIX compliant, which means it adheres to the Portable Operating System Interface (POSIX) standard, which is a set of guidelines that defines a common API for Unix-like operating systems.
+
+In the kernel of NUTTX, we have developed a driver for the RFM95 module, which is our LoRa module, using SPI. This driver is a character driver that communicates with the character device, such as a serial port or a terminal. The POSIX standard defines the interface for character drivers, which includes the following methods: register(), open(), read(), and write(). These methods allow user-space applications to interact with the low-level hardware, such as the RFM95 module, through the kernel.
+
+We have also written the "flight" application in the user-space, which refers to the code that was flashed before the launch. The "flight" application uses the POSIX standard driver methods to interact with peripherals such as RFM95 module, bmp280 barometer, mpu6050, gyroscope/accelerometer, veml6070 uv sensor, isx012 camera.. and collect data during the flight.
+Contact
+
+If you have any questions, please feel free to contact Lorenzo Borghi at info.borghilorenzo@gmail.com.
+
 # Submodules
 
 ```
